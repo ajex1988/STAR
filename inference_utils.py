@@ -104,6 +104,21 @@ def save_video(video, save_dir, file_name, fps=16.0):
     os.system(f'rm -rf {temp_dir}')
     os.rename(tmp_path, output_path)
 
+def load_frames(frame_dir, frame_name_list):
+    frame_list = []
+    for frame_name in frame_name_list:
+        frame_path = os.path.join(frame_dir, frame_name)
+        frame = cv2.imread(frame_path)
+        frame_list.append(frame)
+    return frame_list
+
+def save_frames(frame_dir, frame_name_list, frame_list):
+    assert len(frame_name_list) == len(frame_list), "Number of frame name list and frame list must match"
+    for i in range(len(frame_name_list)):
+        frame = frame_list[i]
+        frame_name = frame_name_list[i]
+        frame_path = os.path.join(frame_dir, frame_name)
+        cv2.imwrite(frame_path, frame)
 
 
 def collate_fn(data, device):
