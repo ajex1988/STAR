@@ -22,19 +22,18 @@ logger = get_logger()
 class STAR():
     def __init__(self, 
                  result_dir='./results/',
-                 file_name='000_video.mp4',
                  model_path='',
                  solver_mode='fast',
                  steps=15,
                  guide_scale=7.5,
                  upscale=4,
                  max_chunk_len=32,
+                 vae_decoder_chunk_size=3
                  ):
         self.model_path=model_path
         logger.info('checkpoint_path: {}'.format(self.model_path))
 
         self.result_dir = result_dir
-        self.file_name = file_name
         os.makedirs(self.result_dir, exist_ok=True)
 
         model_cfg = EasyDict(__name__='model_cfg')
@@ -47,8 +46,9 @@ class STAR():
         self.guide_scale=guide_scale
         self.upscale = upscale
         self.max_chunk_len=max_chunk_len
+        self.vae_decoder_chunk_size=vae_decoder_chunk_size
 
-    def enhence_dir(self, input_frames_dir, input_fps, prompt, win_size, win_step, idx_i, idx_j):
+    def enhance_dir(self, input_frames_dir, input_fps, prompt, win_size, win_step, idx_i, idx_j):
         """
         Enhance the images inside a directory.
         Assume that the dir only contains images of the same format, and the name indicates the frame order.
@@ -105,7 +105,8 @@ class STAR():
             data_tensor = collate_fn(pre_data, 'cuda:0')
             output = self.model.test(data_tensor, total_noise_levels, steps=self.steps, \
                                 solver_mode=self.solver_mode, guide_scale=self.guide_scale, \
-                                max_chunk_len=self.max_chunk_len
+                                max_chunk_len=self.max_chunk_len,
+                                vae_decoder_chunk_size=self.vae_decoder_chunk_size
                                 )
 
         output = tensor2vid(output)
@@ -132,11 +133,13 @@ def parse_args():
     parser.add_argument("--solver_mode", type=str, default='fast', help='fast | normal')
     parser.add_argument("--steps", type=int, default=15)
 
+    parser.add_argument("--input_fps", type=int, default=30)
     parser.add_argument("--sliding_window_size", type=int, default=12, help="sliding window size")
     parser.add_argument("--sliding_window_step", type=int, default=4, help="sliding window step")
     parser.add_argument("--save_idx_i", type=int, default=4, help="beginning index(inclusive)")
     parser.add_argument("--save_idx_j", type=int, default=8, help="end index(exclusive)")
 
+    parser.add_argument("--vae_decoder_chunk_size",type=int,default=3,help="vae_decoder_chunk_size")
     return parser.parse_args()
 
 
@@ -148,9 +151,15 @@ def main():
     prompt = args.prompt
     model_path = args.model_path
     save_dir = args.save_dir
-    file_name = args.file_name
     upscale = args.upscale
     max_chunk_len = args.max_chunk_len
+
+    sliding_window_size = args.sliding_window_size
+    sliding_window_step = args.sliding_window_step
+    save_idx_i = args.save_idx_i
+    save_idx_j = args.save_idx_j
+
+    vae_decoder_chunk_size = args.vae_decoder_chunk_size
 
     steps = args.steps
     solver_mode = args.solver_mode
@@ -160,16 +169,22 @@ def main():
 
     star = STAR(
                 result_dir=save_dir,
-                file_name=file_name,
                 model_path=model_path,
                 solver_mode=solver_mode,
                 steps=steps,
                 guide_scale=guide_scale,
                 upscale=upscale,
                 max_chunk_len=max_chunk_len,
+                vae_decoder_chunk_size=vae_decoder_chunk_size,
                 )
 
-    star.enhance_a_video(input_path, prompt)
+    star.enhance_dir(input_frames_dir=input_path,
+                     input_fps=args.input_fps,
+                     prompt=prompt,
+                     win_size=sliding_window_size,
+                     win_step=sliding_window_step,
+                     idx_i=save_idx_i,
+                     idx_j=save_idx_j)
 
 
 if __name__ == '__main__':

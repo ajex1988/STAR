@@ -115,7 +115,7 @@ def load_frames(frame_dir, frame_name_list):
 def save_frames(frame_dir, frame_name_list, frame_list):
     assert len(frame_name_list) == len(frame_list), "Number of frame name list and frame list must match"
     for i in range(len(frame_name_list)):
-        frame = frame_list[i]
+        frame = frame_list[i][:, :, ::-1]
         frame_name = frame_name_list[i]
         frame_path = os.path.join(frame_dir, frame_name)
         cv2.imwrite(frame_path, frame)

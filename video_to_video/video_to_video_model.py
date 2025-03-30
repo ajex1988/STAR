@@ -73,7 +73,7 @@ class VideoToVideo_sr():
 
 
     def test(self, input: Dict[str, Any], total_noise_levels=1000, \
-                 steps=50, solver_mode='fast', guide_scale=7.5, max_chunk_len=32):
+                 steps=50, solver_mode='fast', guide_scale=7.5, max_chunk_len=32, vae_decoder_chunk_size=3):
         video_data = input['video_data']
         y = input['y']
         (target_h, target_w) = input['target_res']
@@ -124,7 +124,7 @@ class VideoToVideo_sr():
             torch.cuda.empty_cache()
 
             logger.info(f'sampling, finished.')
-            vid_tensor_gen = self.vae_decode_chunk(gen_vid, chunk_size=3)
+            vid_tensor_gen = self.vae_decode_chunk(gen_vid, chunk_size=vae_decoder_chunk_size)
 
             logger.info(f'temporal vae decoding, finished.')
 
