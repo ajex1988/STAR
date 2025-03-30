@@ -66,17 +66,17 @@ class STAR():
             w_img_name_list = img_name_list[w_start_idx:w_end_idx]
             frames = load_frames(input_frames_dir, w_img_name_list)
             video_sr = self.enhance_a_video(input_frames=frames, input_fps=input_fps, prompt=prompt)
-            image_sr_list = [(img.numpy()).astype('uint8') for img in video_sr]
+            image_sr_list = [(img.numpy()).astype('uint8')[:,:,::-1] for img in video_sr]
             if w_i == 0:
                 save_frame_list = image_sr_list[:idx_j]
-                save_name_list = img_name_list[:idx_j]
+                save_name_list = w_img_name_list[:idx_j]
             elif w_i==n_steps-1:
                 save_frame_list = image_sr_list[idx_i:]
-                save_name_list = img_name_list[idx_i:]
+                save_name_list = w_img_name_list[idx_i:]
             else:
                 ## Only save the frames between idx_i and idx_j
                 save_frame_list = image_sr_list[idx_i:idx_j]
-                save_name_list = img_name_list[idx_i:idx_j]
+                save_name_list = w_img_name_list[idx_i:idx_j]
             for i in range(len(save_name_list)):
                 out_path = os.path.join(self.result_dir, save_name_list[i])
                 cv2.imwrite(out_path, save_frame_list[i])
