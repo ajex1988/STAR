@@ -124,11 +124,11 @@ class STAR():
                                          vae_decoder_chunk_size=self.vae_decoder_chunk_size
                                          )
                 output = torch.squeeze(output)
-                # output = torch.permute(output, (1,0,2,3))
+                output = torch.permute(output, (1,0,2,3))
             im_spliter.update_gaussian(output, index_infos)
 
         im_sr = im_spliter.gather()
-        # im_sr = torch.permute(im_sr, (1,0,2,3))
+        im_sr = torch.permute(im_sr, (1,0,2,3))
         im_sr = im_sr[None,:,:,:,:]
         output = tensor2vid(im_sr)
         # Using color fix
