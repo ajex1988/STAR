@@ -118,3 +118,31 @@ class ImageSpliterTh:
     def gather(self):
         assert torch.all(self.pixel_count != 0)
         return self.im_res.div(self.pixel_count)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--img_path", type=str)
+    parser.add_argument("--out_path", type=str)
+    parser.add_argument("--pch_size", type=int, default=256)
+    parser.add_argument("--pch_overlap", type=int, default=128)
+
+    args = parser.parse_args()
+    from PIL import Image
+    from torchvision import transforms
+    import os
+
+    img = Image.open(args.img_path)
+    to_tensor = transforms.ToTensor()
+    tensor_img = to_tensor(img)
+    tensor_img = tensor_img.unsqueeze(0)
+    img_spliter = ImageSpliterTh(tensor_img, args.pch_size, args.pch_overlap)
+    to_pil = transforms.ToPILImage()
+
+    for i, (pch, _) in enumerate(img_spliter):
+        img_pil = to_pil(pch.squeeze())
+        img_pil.save(os.path.join(args.out_path, f"{i:03d}.png"))
+
+
