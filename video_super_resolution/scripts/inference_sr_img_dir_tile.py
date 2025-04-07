@@ -104,13 +104,12 @@ class STAR():
         tile_num = len(im_spliter)
         print(f"{tile_num} tiles to process")
         for im_lq_pch, index_infos in im_spliter:
-            video_data = im_lq_pch
-            _, _, h, w = video_data.shape
+            _, _, h, w = im_lq_pch.shape
             logger.info('input resolution: {}'.format((h, w)))
             target_h, target_w = int(h * self.upscale), int(w * self.upscale)  # adjust_resolution(h, w, up_scale=4)
             logger.info('target resolution: {}'.format((target_h, target_w)))
 
-            pre_data = {'video_data': video_data, 'y': caption}
+            pre_data = {'video_data': im_lq_pch, 'y': caption}
             pre_data['target_res'] = (target_h, target_w)
 
             total_noise_levels = 900
@@ -123,6 +122,11 @@ class STAR():
                                          max_chunk_len=self.max_chunk_len,
                                          vae_decoder_chunk_size=self.vae_decoder_chunk_size
                                          )
+                mean = torch.tensor([0.5, 0.5, 0.5], device=output.device).reshape(1, -1, 1, 1, 1)
+                std = torch.tensor([0.5, 0.5, 0.5], device=output.device).reshape(1, -1, 1, 1, 1)
+                output = output.mul_(std).add_(mean)
+                output = output.clamp_(0, 1)
+                output = output.sub_(mean).div_(std)
                 output = torch.squeeze(output)
                 output = torch.permute(output, (1,0,2,3))
             im_spliter.update_gaussian(output, index_infos)
