@@ -119,8 +119,7 @@ class ImageSpliterTh:
         assert torch.all(self.pixel_count != 0)
         return self.im_res.div(self.pixel_count)
 
-
-if __name__ == "__main__":
+def img_test():
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -144,5 +143,44 @@ if __name__ == "__main__":
     for i, (pch, _) in enumerate(img_spliter):
         img_pil = to_pil(pch.squeeze())
         img_pil.save(os.path.join(args.out_path, f"{i:03d}.png"))
+
+
+def video_test():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--in_dir", type=str)
+    parser.add_argument("--out_dir", type=str)
+    parser.add_argument("--tile_num", type=int, default=15)
+    parser.add_argument("--pch_size", type=int, default=256)
+    parser.add_argument("--pch_overlap", type=int, default=128)
+
+    args = parser.parse_args()
+    from PIL import Image
+    from torchvision import transforms
+    import os
+
+    img_name_list = sorted(os.listdir(args.in_dir))
+    for img_name in img_name_list:
+        img_path = os.path.join(args.in_dir, img_name)
+
+        img = Image.open(img_path)
+        to_tensor = transforms.ToTensor()
+        tensor_img = to_tensor(img)
+        tensor_img = tensor_img.unsqueeze(0)
+        img_spliter = ImageSpliterTh(tensor_img, args.pch_size, args.pch_overlap)
+        to_pil = transforms.ToPILImage()
+
+        for i, (pch, _) in enumerate(img_spliter):
+            img_pil = to_pil(pch.squeeze())
+            sub_out_dir = f"{args.out_dir}/{i:03d}"
+            if not os.path.exists(sub_out_dir):
+                os.makedirs(sub_out_dir)
+            img_pil.save(os.path.join(sub_out_dir, img_name))
+
+
+
+if __name__ == "__main__":
+    video_test()
 
 
