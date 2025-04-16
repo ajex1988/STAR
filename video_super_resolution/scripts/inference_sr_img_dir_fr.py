@@ -19,7 +19,7 @@ from inference_utils import *
 logger = get_logger()
 
 
-class STAR():
+class STARFR():
     def __init__(self, 
                  result_dir='./results/',
                  model_path='',
