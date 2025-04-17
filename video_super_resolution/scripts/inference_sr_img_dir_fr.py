@@ -19,7 +19,7 @@ from inference_utils import *
 logger = get_logger()
 
 
-class STARFR():
+class STAR():
     def __init__(self, 
                  result_dir='./results/',
                  model_path='',
@@ -116,7 +116,63 @@ class STARFR():
 
         # save_video(output, self.result_dir, self.file_name, fps=input_fps)
         return output
-    
+
+class StarFR(STAR):
+    """
+    Feature Resetting trick played in STAR approach
+    """
+    def __init__(self,
+                 result_dir='./results/',
+                 model_path='',
+                 solver_mode='fast',
+                 steps=15,
+                 guide_scale=7.5,
+                 upscale=4,
+                 max_chunk_len=32,
+                 vae_decoder_chunk_size=3
+                 ):
+        super(StarFR, self).__init__(result_dir=result_dir,
+                                     model_path=model_path,
+                                     solver_mode=solver_mode,
+                                     steps=steps,
+                                     guide_scale=guide_scale,
+                                     upscale=upscale,
+                                     max_chunk_len=max_chunk_len,
+                                     vae_decoder_chunk_size=vae_decoder_chunk_size
+                                     )
+        print("STAR with Feature Resetting trick")
+
+
+    def enhance_dir_recur(self, input_frames_dir, prompt, win_size, win_step):
+        """
+        Enhance the images inside a directory, using an approach in a 'recursive' way.
+        For the first and last window, use the 'same' padding strategy.
+        For example, win_size = 5 and win_step = 3.
+        Step1, pad two frames ahead. [f1, f1,] f1, f2, f3. Step2, f2, f3, f4, f5, [f5]
+        """
+        assert win_size > win_step, "window size should be larger than window step."
+
+        img_name_list = os.listdir(input_frames_dir)
+        img_name_list.sort()
+
+        n_frames = len(img_name_list)
+        n_steps = int(ceil(n_frames / win_step))
+        for w_i in range(n_steps):
+            if w_i == 0:
+                # First step
+                pass
+            elif w_i == n_steps-1 and n_frames % win_step != 0:
+                pass
+            else:
+                pass
+
+    def enahnce_a_video_fm(self, input_frames, feature_maps, overlap_frame_num, prompt):
+        """
+        Enhance a video volume conditioned on previous volume's output feature maps.
+        This trick aims at aligning the sr videos based on previous processed frames.
+        """
+        output = input_frames
+        return output, feature_maps
 
 def parse_args():
     parser = ArgumentParser()
