@@ -159,7 +159,15 @@ class VideoToVideo_sr():
         z = torch.cat(z_list, dim=0)
         z = rearrange(z, "(b f) c h w -> b c f h w", f=num_f)
         return z * self.vae.config.scaling_factor
-    
+
+
+class Vid2VidFr(VideoToVideo_sr):
+    """
+    Video to video model with feature resetting.
+    """
+    def __init__(self, opt, device=torch.device(f'cuda:0')):
+        super().__init__(opt, device)
+
 
 def pad_to_fit(h, w):
     BEST_H, BEST_W = 720, 1280
