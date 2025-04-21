@@ -127,9 +127,7 @@ class StarFR(STAR):
                  solver_mode='fast',
                  steps=15,
                  guide_scale=7.5,
-                 upscale=4,
-                 max_chunk_len=32,
-                 vae_decoder_chunk_size=3
+                 upscale=4
                  ):
         super(StarFR, self).__init__(result_dir=result_dir,
                                      model_path=model_path,
@@ -137,8 +135,8 @@ class StarFR(STAR):
                                      steps=steps,
                                      guide_scale=guide_scale,
                                      upscale=upscale,
-                                     max_chunk_len=max_chunk_len,
-                                     vae_decoder_chunk_size=vae_decoder_chunk_size
+                                     max_chunk_len=32,
+                                     vae_decoder_chunk_size=3
                                      )
         print("STAR with Feature Resetting trick")
         model_cfg = EasyDict(__name__='model_cfg')
@@ -266,16 +264,11 @@ def parse_args():
     parser.add_argument("--solver_mode", type=str, default='fast', help='fast | normal')
     parser.add_argument("--steps", type=int, default=15)
 
-    parser.add_argument("--input_fps", type=int, default=30)
-    parser.add_argument("--sliding_window_size", type=int, default=12, help="sliding window size")
-    parser.add_argument("--sliding_window_step", type=int, default=4, help="sliding window step")
-    parser.add_argument("--save_idx_i", type=int, default=4, help="beginning index(inclusive)")
-    parser.add_argument("--save_idx_j", type=int, default=8, help="end index(exclusive)")
 
-    parser.add_argument("--vae_decoder_chunk_size",type=int,default=3,help="vae_decoder_chunk_size")
+    parser.add_argument("--win_step", type=int, default=2)
+    parser.add_argument("--win_overlap", type=int, default=1)
+    parser.add_argument("--color_cor_method", type=str, default="wavelet")
 
-    parser.add_argument("--positive_prompt", type=str, default=None, help="prompt")
-    parser.add_argument("--negative_prompt", type=str, default=None, help="prompt")
     return parser.parse_args()
 
 
@@ -288,14 +281,10 @@ def main():
     model_path = args.model_path
     save_dir = args.save_dir
     upscale = args.upscale
-    max_chunk_len = args.max_chunk_len
-
-    sliding_window_size = args.sliding_window_size
-    sliding_window_step = args.sliding_window_step
-    save_idx_i = args.save_idx_i
-    save_idx_j = args.save_idx_j
-
-    vae_decoder_chunk_size = args.vae_decoder_chunk_size
+    
+    win_step = args.win_step
+    win_overlap = args.win_overlap
+    color_cor_method = args.color_cor_method
 
     steps = args.steps
     solver_mode = args.solver_mode
@@ -303,24 +292,20 @@ def main():
 
     assert solver_mode in ('fast', 'normal')
 
-    star = STAR(
+    star_fr = StarFR(
                 result_dir=save_dir,
                 model_path=model_path,
                 solver_mode=solver_mode,
                 steps=steps,
                 guide_scale=guide_scale,
-                upscale=upscale,
-                max_chunk_len=max_chunk_len,
-                vae_decoder_chunk_size=vae_decoder_chunk_size,
+                upscale=upscale
                 )
 
-    star.enhance_dir(input_frames_dir=input_path,
-                     input_fps=args.input_fps,
-                     prompt=prompt,
-                     win_size=sliding_window_size,
-                     win_step=sliding_window_step,
-                     idx_i=save_idx_i,
-                     idx_j=save_idx_j)
+    star_fr.enhance_dir_recur(input_frames_dir=input_path,
+                             prompt=prompt,
+                             win_step=win_step,
+                             win_overlap=win_overlap,
+                             color_cor_method=color_cor_method)
 
 
 if __name__ == '__main__':
