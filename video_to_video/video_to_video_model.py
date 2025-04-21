@@ -12,6 +12,7 @@ from video_to_video.utils.config import cfg
 from video_to_video.diffusion.diffusion_sdedit import GaussianDiffusion
 from video_to_video.diffusion.schedules_sdedit import noise_schedule
 from video_to_video.utils.logger import get_logger
+from video_to_video.modules.autoencoder_kl_temporal_decoder_feature_resetting import AutoencoderKLTemporalDecoderFeatureResetting
 
 from diffusers import AutoencoderKLTemporalDecoder
 
@@ -167,6 +168,103 @@ class Vid2VidFr(VideoToVideo_sr):
     """
     def __init__(self, opt, device=torch.device(f'cuda:0')):
         super().__init__(opt, device)
+        vae = AutoencoderKLTemporalDecoderFeatureResetting.from_pretrained(
+            "stabilityai/stable-video-diffusion-img2vid", subfolder="vae", variant="fp16"
+        )
+        vae.eval()
+        vae.requires_grad_(False)
+        vae.to(self.device)
+        self.vae = vae
+        logger.info('Build Temporal VAE with Feature Resetting Decoder.')
+
+        torch.cuda.empty_cache()
+
+    def vae_decode_fr(self, z, feature_map_prev, is_first_batch, frame_overlap_num):
+        z = rearrange(z, "b c f h w -> (b f) c h w")
+        video, feature_map_cur = self.vae.decode(z / self.vae.config.scaling_factor,
+                                                 feature_map_prev=feature_map_prev,
+                                                 is_first_batch=is_first_batch,
+                                                 frame_overlap_num=frame_overlap_num)
+        video = video.sample
+        return video, feature_map_cur
+
+
+    def infer(self,
+             input: Dict[str, Any],
+             feature_map_prev: Dict,
+             is_first_batch: bool = False,
+             frame_overlap_num: int = 1,
+             total_noise_levels=1000,
+             steps=50,
+             solver_mode='fast',
+             guide_scale=7.5,
+             max_chunk_len=32):
+        video_data = input['video_data']
+        y = input['y']
+        (target_h, target_w) = input['target_res']
+
+        video_data = F.interpolate(video_data, [target_h, target_w], mode='bilinear')
+
+        logger.info(f'video_data shape: {video_data.shape}')
+        frames_num, _, h, w = video_data.shape
+
+        padding = pad_to_fit(h, w)
+        video_data = F.pad(video_data, padding, 'constant', 1)
+
+        video_data = video_data.unsqueeze(0)
+        bs = 1
+        video_data = video_data.to(self.device)
+
+        video_data_feature = self.vae_encode(video_data)
+        torch.cuda.empty_cache()
+
+        y = self.text_encoder(y).detach()
+
+        with amp.autocast(enabled=True):
+            t = torch.LongTensor([total_noise_levels - 1]).to(self.device)
+            noised_lr = self.diffusion.diffuse(video_data_feature, t)
+
+            model_kwargs = [{'y': y}, {'y': self.negative_y}]
+            model_kwargs.append({'hint': video_data_feature})
+
+            torch.cuda.empty_cache()
+            chunk_inds = make_chunks(frames_num, interp_f_num=0,
+                                     max_chunk_len=max_chunk_len) if frames_num > max_chunk_len else None
+
+            solver = 'dpmpp_2m_sde'  # 'heun' | 'dpmpp_2m_sde'
+            gen_vid = self.diffusion.sample_sr(
+                noise=noised_lr,
+                model=self.generator,
+                model_kwargs=model_kwargs,
+                guide_scale=guide_scale,
+                guide_rescale=0.2,
+                solver=solver,
+                solver_mode=solver_mode,
+                return_intermediate=None,
+                steps=steps,
+                t_max=total_noise_levels - 1,
+                t_min=0,
+                discretization='trailing',
+                chunk_inds=chunk_inds, )
+            torch.cuda.empty_cache()
+
+            logger.info(f'sampling, finished.')
+            vid_tensor_gen, feature_map_prev = self.vae_decode_fr(z=gen_vid,
+                                                                  feature_map_prev=feature_map_prev,
+                                                                  is_first_batch=is_first_batch,
+                                                                  frame_overlap_num=frame_overlap_num)
+
+            logger.info(f'temporal vae decoding with feature resetting, finished.')
+
+        w1, w2, h1, h2 = padding
+        vid_tensor_gen = vid_tensor_gen[:, :, h1:h + h1, w1:w + w1]
+
+        gen_video = rearrange(
+            vid_tensor_gen, '(b f) c h w -> b c f h w', b=bs)
+
+        torch.cuda.empty_cache()
+
+        return gen_video.type(torch.float32).cpu(), feature_map_prev
 
 
 def pad_to_fit(h, w):

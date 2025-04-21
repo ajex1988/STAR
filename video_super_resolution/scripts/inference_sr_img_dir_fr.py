@@ -12,7 +12,7 @@ sys.path.append(base_path)
 from video_to_video.video_to_video_model import VideoToVideo_sr, Vid2VidFr
 from video_to_video.utils.seed import setup_seed
 from video_to_video.utils.logger import get_logger
-from video_super_resolution.color_fix import adain_color_fix
+from video_super_resolution.color_fix import adain_color_fix, wavelet_color_fix
 
 from inference_utils import *
 
@@ -147,14 +147,14 @@ class StarFR(STAR):
         print("Setting the model to Video2Video with Feature Resetting")
 
 
-    def enhance_dir_recur(self, input_frames_dir, prompt, win_size, win_step):
+    def enhance_dir_recur(self, input_frames_dir, prompt, win_step, win_overlap, color_cor_method="wavelet"):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
         For example, win_size = 5 and win_step = 3.
         Step1, pad two frames ahead. [f1, f1,] f1, f2, f3. Step2, f2, f3, f4, f5, [f5]
         """
-        assert win_size > win_step, "window size should be larger than window step."
+        assert win_step > win_overlap, "window step should be larger than window overlap."
 
         img_name_list = os.listdir(input_frames_dir)
         img_name_list.sort()
@@ -162,21 +162,94 @@ class StarFR(STAR):
         n_frames = len(img_name_list)
         n_steps = int(ceil(n_frames / win_step))
         for w_i in range(n_steps):
-            if w_i == 0:
-                # First step
-                pass
-            elif w_i == n_steps-1 and n_frames % win_step != 0:
-                pass
-            else:
-                pass
+            w_start_idx = w_i * win_step
+            w_end_idx = w_start_idx + win_step if w_i != n_steps - 1 else n_frames
+            w_img_name_list = img_name_list[w_start_idx:w_end_idx]
 
-    def enahnce_a_video_fm(self, input_frames, feature_maps, overlap_frame_num, prompt):
+            if w_i == 0:
+                is_first_batch = True
+                dummy_frame_list = [img_name_list[0] for i in range(win_overlap)]
+                w_img_name_list = dummy_frame_list.extend(w_img_name_list)
+                frames = load_frames(input_frames_dir, w_img_name_list)
+                feature_map_prev = torch.zeros(0)
+            elif w_i == n_steps-1 and n_frames % win_step != 0:
+                is_first_batch = False
+                dummy_frame_list = [img_name_list[-1] for i in range(win_step-n_frames%win_step)]
+                w_img_name_list = w_img_name_list.extend(dummy_frame_list)
+                frames = load_frames(input_frames_dir, w_img_name_list)
+            else:
+                is_first_batch = False
+                frames = load_frames(input_frames_dir, w_img_name_list)
+
+            video_sr, feature_map_prev = self.enhance_a_video_fm(input_frames=frames,
+                                                                 feature_map_prev=feature_map_prev,
+                                                                 is_first_batch=is_first_batch,
+                                                                 overlap_frame_num=win_overlap,
+                                                                 prompt=prompt,
+                                                                 color_cor_method=color_cor_method)
+
+            image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
+            if w_i==n_steps-1:
+                save_frame_list = image_sr_list[:n_frames%win_step]
+                save_name_list = w_img_name_list[:n_frames%win_step]
+            else:
+                save_frame_list = image_sr_list[-win_step:]
+                save_name_list = w_img_name_list[-win_step:]
+            for i in range(len(save_name_list)):
+                out_path = os.path.join(self.result_dir, save_name_list[i])
+                cv2.imwrite(out_path, save_frame_list[i])
+
+    def enahnce_a_video_fm(self,
+                           input_frames,
+                           feature_map_prev,
+                           is_first_batch,
+                           overlap_frame_num,
+                           prompt,
+                           color_cor_method):
         """
         Enhance a video volume conditioned on previous volume's output feature maps.
         This trick aims at aligning the sr videos based on previous processed frames.
         """
-        output = input_frames
-        return output, feature_maps
+        text = prompt
+        logger.info('text: {}'.format(text))
+        caption = text + self.model.positive_prompt
+
+        video_data = preprocess(input_frames)
+        _, _, h, w = video_data.shape
+        logger.info('input resolution: {}'.format((h, w)))
+        target_h, target_w = int(h * self.upscale), int(w * self.upscale)  # adjust_resolution(h, w, up_scale=4)
+        logger.info('target resolution: {}'.format((target_h, target_w)))
+
+        pre_data = {'video_data': video_data, 'y': caption}
+        pre_data['target_res'] = (target_h, target_w)
+
+        total_noise_levels = 900
+        setup_seed(666)
+
+        with torch.no_grad():
+            data_tensor = collate_fn(pre_data, 'cuda:0')
+            output, feature_map_prev = self.model.infer(input=data_tensor,
+                                      feature_map_prev=feature_map_prev,
+                                      is_first_batch=is_first_batch,
+                                      frame_overlap_num=overlap_frame_num,
+                                      total_noise_levels=total_noise_levels,
+                                      steps=self.steps,
+                                      solver_mode=self.solver_mode,
+                                      guide_scale=self.guide_scale
+                                     )
+
+        output = tensor2vid(output)
+
+        # Using color fix
+        if color_cor_method == "adain":
+            output = adain_color_fix(output, video_data)
+        elif color_cor_method == "wavelet":
+            output = wavelet_color_fix(output, video_data)
+        else:
+            raise NotImplementedError("Color correction method not implemented.")
+
+        # save_video(output, self.result_dir, self.file_name, fps=input_fps)
+        return output, feature_map_prev
 
 def parse_args():
     parser = ArgumentParser()
