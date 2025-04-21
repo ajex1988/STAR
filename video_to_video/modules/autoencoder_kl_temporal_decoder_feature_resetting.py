@@ -3,8 +3,11 @@ from typing import Dict, Optional, Tuple, Union
 
 from diffusers import AutoencoderKLTemporalDecoder
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
+from diffusers.models.autoencoders.vae import DecoderOutput
 
 from diffusers.utils.import_utils import is_torch_version
+from diffusers.configuration_utils import register_to_config
+from diffusers.utils.accelerate_utils import apply_forward_hook
 
 
 class TemporalDecoderFeatureResetting(TemporalDecoder):
@@ -140,4 +143,54 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
         return sample, feature_map_cur
 
 class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder):
-    pass
+    @register_to_config
+    def __init__(
+            self,
+            in_channels: int = 3,
+            out_channels: int = 3,
+            down_block_types: Tuple[str] = ("DownEncoderBlock2D",),
+            block_out_channels: Tuple[int] = (64,),
+            layers_per_block: int = 1,
+            latent_channels: int = 4,
+            sample_size: int = 32,
+            scaling_factor: float = 0.18215,
+            force_upcast: float = True,
+    ):
+        super(AutoencoderKLTemporalDecoderFeatureResetting, self).__init__(in_channels=in_channels,
+                                                                           out_channels=out_channels,
+                                                                           down_block_types=down_block_types,
+                                                                           block_out_channels=block_out_channels,
+                                                                           layers_per_block=layers_per_block,
+                                                                           latent_channels=latent_channels,
+                                                                           sample_size=sample_size,
+                                                                           scaling_factor=scaling_factor,
+                                                                           force_upcast=force_upcast)
+        self.decoder = TemporalDecoderFeatureResetting(in_channels=in_channels,
+                                                       out_channels=out_channels,
+                                                       block_out_channels=block_out_channels,
+                                                       layers_per_block=layers_per_block)
+
+    @apply_forward_hook
+    def decode(
+        self,
+        z: torch.Tensor,
+        feature_map_prev: Dict,
+        num_frames: int,
+        frame_overlap_num: int,
+        is_first_batch: bool = False,
+        return_dict: bool = True,
+    ) -> Union[DecoderOutput, torch.Tensor]:
+        batch_size = z.shape[0] // num_frames
+        image_only_indicator = torch.zeros(batch_size, num_frames, dtype=z.dtype, device=z.device)
+
+        decoded, feature_map_cur = self.decoder(sample=z,
+                                                feature_map_prev=feature_map_prev,
+                                                image_only_indicator=image_only_indicator,
+                                                frame_overlap_num=frame_overlap_num,
+                                                is_first_batch=is_first_batch,
+                                                num_frames=num_frames)
+
+        if not return_dict:
+            return (decoded, feature_map_cur)
+
+        return DecoderOutput(sample=decoded), feature_map_cur

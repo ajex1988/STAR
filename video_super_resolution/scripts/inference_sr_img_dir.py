@@ -114,6 +114,8 @@ class STAR():
         # Using color fix
         output = adain_color_fix(output, video_data)
 
+        # Release cached gpu memory
+        torch.cuda.empty_cache()
         # save_video(output, self.result_dir, self.file_name, fps=input_fps)
         return output
     

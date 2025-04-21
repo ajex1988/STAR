@@ -9,7 +9,7 @@ from math import ceil
 import sys
 base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 sys.path.append(base_path)
-from video_to_video.video_to_video_model import VideoToVideo_sr
+from video_to_video.video_to_video_model import VideoToVideo_sr, Vid2VidFr
 from video_to_video.utils.seed import setup_seed
 from video_to_video.utils.logger import get_logger
 from video_super_resolution.color_fix import adain_color_fix
@@ -141,6 +141,10 @@ class StarFR(STAR):
                                      vae_decoder_chunk_size=vae_decoder_chunk_size
                                      )
         print("STAR with Feature Resetting trick")
+        model_cfg = EasyDict(__name__='model_cfg')
+        model_cfg.model_path = self.model_path
+        self.model = Vid2VidFr(model_cfg)
+        print("Setting the model to Video2Video with Feature Resetting")
 
 
     def enhance_dir_recur(self, input_frames_dir, prompt, win_size, win_step):
