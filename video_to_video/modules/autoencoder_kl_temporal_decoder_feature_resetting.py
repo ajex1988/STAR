@@ -165,7 +165,7 @@ class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder)
                                                                            sample_size=sample_size,
                                                                            scaling_factor=scaling_factor,
                                                                            force_upcast=force_upcast)
-        self.decoder = TemporalDecoderFeatureResetting(in_channels=in_channels,
+        self.decoder = TemporalDecoderFeatureResetting(in_channels=latent_channels,
                                                        out_channels=out_channels,
                                                        block_out_channels=block_out_channels,
                                                        layers_per_block=layers_per_block)
