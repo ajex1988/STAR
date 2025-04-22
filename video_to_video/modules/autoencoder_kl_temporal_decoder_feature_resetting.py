@@ -149,7 +149,7 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
         if is_first_batch:
             sample = self.time_conv_out(sample)
         else:
-            sample[:frame_overlap_num, :, :, :, :] = feature_map_prev["conv_out"][-frame_overlap_num:, :, :, :, :]
+            sample[:, :, :frame_overlap_num, :, :] = feature_map_prev["conv_out"][:, :, -frame_overlap_num:, :, :]
             sample = self.time_conv_out(sample)
 
         sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)

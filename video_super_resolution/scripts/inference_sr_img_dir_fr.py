@@ -177,6 +177,8 @@ class StarFR(STAR):
                 frames = load_frames(input_frames_dir, w_img_name_list)
             else:
                 is_first_batch = False
+                dummy_frame_list = img_name_list[w_start_idx-win_overlap:w_start_idx]
+                w_img_name_list = dummy_frame_list + w_img_name_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
 
             video_sr, feature_map_prev = self.enhance_a_video_fm(input_frames=frames,
