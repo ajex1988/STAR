@@ -104,17 +104,31 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
             # up
             for i, up_block in enumerate(self.up_blocks):
-                if is_first_batch:
-                    sample = up_block(sample, image_only_indicator=image_only_indicator)
-                else:
-                    if i == 0:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"][-frame_overlap_num:, :, :, :]
+                if i == 0:
+                    if is_first_batch:
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
-                        feature_map_cur["up_block"] = [sample.clone()]
                     else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i-1][-frame_overlap_num:, :, :, :]
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"][-frame_overlap_num:, :, :,:]
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
-                        feature_map_cur["up_block"].append(sample.clone())
+                    feature_map_cur["up_block"] = [sample.clone()]
+                else:
+                    if is_first_batch:
+                        sample = up_block(sample, image_only_indicator=image_only_indicator)
+                    else:
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1][-frame_overlap_num:,:, :, :]
+                        sample = up_block(sample, image_only_indicator=image_only_indicator)
+                    feature_map_cur["up_block"].append(sample.clone())
+                # if is_first_batch:
+                #     sample = up_block(sample, image_only_indicator=image_only_indicator)
+                # else:
+                #     if i == 0:
+                #         sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"][-frame_overlap_num:, :, :, :]
+                #         sample = up_block(sample, image_only_indicator=image_only_indicator)
+                #         feature_map_cur["up_block"] = [sample.clone()]
+                #     else:
+                #         sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i-1][-frame_overlap_num:, :, :, :]
+                #         sample = up_block(sample, image_only_indicator=image_only_indicator)
+                #         feature_map_cur["up_block"].append(sample.clone())
 
         # post-process
         sample = self.conv_norm_out(sample)

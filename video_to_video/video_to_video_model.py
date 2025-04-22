@@ -183,6 +183,7 @@ class Vid2VidFr(VideoToVideo_sr):
         z = rearrange(z, "b c f h w -> (b f) c h w")
         video, feature_map_cur = self.vae.decode(z / self.vae.config.scaling_factor,
                                                  feature_map_prev=feature_map_prev,
+                                                 num_frames=z.shape[0],
                                                  is_first_batch=is_first_batch,
                                                  frame_overlap_num=frame_overlap_num)
         video = video.sample
