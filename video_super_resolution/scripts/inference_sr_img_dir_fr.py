@@ -152,7 +152,7 @@ class StarFR(STAR):
         For example, win_size = 5 and win_step = 3.
         Step1, pad two frames ahead. [f1, f1,] f1, f2, f3. Step2, f2, f3, f4, f5, [f5]
         """
-        assert win_step > win_overlap, "window step should be larger than window overlap."
+        assert win_step >= win_overlap, "window step should be no smaller than window overlap."
 
         img_name_list = os.listdir(input_frames_dir)
         img_name_list.sort()
@@ -167,13 +167,13 @@ class StarFR(STAR):
             if w_i == 0:
                 is_first_batch = True
                 dummy_frame_list = [img_name_list[0] for i in range(win_overlap)]
-                w_img_name_list = dummy_frame_list.extend(w_img_name_list)
+                w_img_name_list = dummy_frame_list + w_img_name_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
                 feature_map_prev = torch.zeros(0)
             elif w_i == n_steps-1 and n_frames % win_step != 0:
                 is_first_batch = False
                 dummy_frame_list = [img_name_list[-1] for i in range(win_step-n_frames%win_step)]
-                w_img_name_list = w_img_name_list.extend(dummy_frame_list)
+                w_img_name_list = w_img_name_list + dummy_frame_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
             else:
                 is_first_batch = False
@@ -197,7 +197,7 @@ class StarFR(STAR):
                 out_path = os.path.join(self.result_dir, save_name_list[i])
                 cv2.imwrite(out_path, save_frame_list[i])
 
-    def enahnce_a_video_fm(self,
+    def enhance_a_video_fm(self,
                            input_frames,
                            feature_map_prev,
                            is_first_batch,
@@ -292,7 +292,7 @@ def main():
 
     assert solver_mode in ('fast', 'normal')
 
-    star_fr = StarFR(
+    starfr = StarFR(
                 result_dir=save_dir,
                 model_path=model_path,
                 solver_mode=solver_mode,
@@ -301,7 +301,7 @@ def main():
                 upscale=upscale
                 )
 
-    star_fr.enhance_dir_recur(input_frames_dir=input_path,
+    starfr.enhance_dir_recur(input_frames_dir=input_path,
                              prompt=prompt,
                              win_step=win_step,
                              win_overlap=win_overlap,
