@@ -168,16 +168,18 @@ class StarFR(STAR):
                 is_first_batch = True
                 frames = load_frames(input_frames_dir, w_img_name_list)
                 feature_map_prev = torch.zeros(0)
+                z_prev = None
             else:
                 is_first_batch = False
                 frames = load_frames(input_frames_dir, w_img_name_list)
 
-            video_sr, feature_map_prev = self.enhance_a_video_fr(input_frames=frames,
-                                                                 feature_map_prev=feature_map_prev,
-                                                                 is_first_batch=is_first_batch,
-                                                                 overlap_frame_num=out_win_overlap,
-                                                                 prompt=prompt,
-                                                                 color_cor_method=color_cor_method)
+            video_sr, feature_map_prev, z_prev = self.enhance_a_video_fr(input_frames=frames,
+                                                                         feature_map_prev=feature_map_prev,
+                                                                         z_prev=z_prev,
+                                                                         is_first_batch=is_first_batch,
+                                                                         overlap_frame_num=out_win_overlap,
+                                                                         prompt=prompt,
+                                                                         color_cor_method=color_cor_method)
 
             image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
             for i in range(len(w_img_name_list)):
@@ -187,8 +189,10 @@ class StarFR(STAR):
     def enhance_a_video_fr(self,
                            input_frames,
                            feature_map_prev,
+                           z_prev,
                            is_first_batch,
-                           overlap_frame_num,
+                           out_win_step,
+                           out_win_overlap,
                            prompt,
                            color_cor_method):
         """
@@ -213,15 +217,17 @@ class StarFR(STAR):
 
         with torch.no_grad():
             data_tensor = collate_fn(pre_data, 'cuda:0')
-            output, feature_map_prev = self.model.infer(input=data_tensor,
-                                      feature_map_prev=feature_map_prev,
-                                      is_first_batch=is_first_batch,
-                                      frame_overlap_num=overlap_frame_num,
-                                      total_noise_levels=total_noise_levels,
-                                      steps=self.steps,
-                                      solver_mode=self.solver_mode,
-                                      guide_scale=self.guide_scale
-                                     )
+            output, feature_map_prev, z_prev = self.model.infer(input=data_tensor,
+                                                        feature_map_prev=feature_map_prev,
+                                                        z_prev=z_prev,
+                                                        is_first_batch=is_first_batch,
+                                                        out_win_step=out_win_step,
+                                                        out_win_overlap=out_win_overlap,
+                                                        total_noise_levels=total_noise_levels,
+                                                        steps=self.steps,
+                                                        solver_mode=self.solver_mode,
+                                                        guide_scale=self.guide_scale
+                                                        )
 
         output = tensor2vid(output)
 
@@ -234,7 +240,7 @@ class StarFR(STAR):
             raise NotImplementedError("Color correction method not implemented.")
 
         # save_video(output, self.result_dir, self.file_name, fps=input_fps)
-        return output, feature_map_prev
+        return output, feature_map_prev, z_prev
 
 def parse_args():
     parser = ArgumentParser()
@@ -253,7 +259,7 @@ def parse_args():
 
 
     parser.add_argument("--in_win_size", type=int, default=12, help="Window size of encoder & DM")
-    parser.add_argument("--out_win_step", type=int, default=2, help="Window step of decoder")
+    parser.add_argument("--out_win_step", type=int, default=1, help="Window step of decoder")
     parser.add_argument("--out_win_overlap", type=int, default=1, help="Window overlap of decoder")
     parser.add_argument("--color_cor_method", type=str, default="wavelet")
 
@@ -269,9 +275,10 @@ def main():
     model_path = args.model_path
     save_dir = args.save_dir
     upscale = args.upscale
-    
-    win_step = args.win_step
-    win_overlap = args.win_overlap
+
+    in_win_size = args.in_win_size
+    out_win_step = args.out_win_step
+    out_win_overlap = args.out_win_overlap
     color_cor_method = args.color_cor_method
 
     steps = args.steps
@@ -291,8 +298,9 @@ def main():
 
     starfr.enhance_dir_recur(input_frames_dir=input_path,
                              prompt=prompt,
-                             win_step=win_step,
-                             win_overlap=win_overlap,
+                             in_win_size=in_win_size,
+                             out_win_step=out_win_step,
+                             out_win_overlap=out_win_overlap,
                              color_cor_method=color_cor_method)
 
 

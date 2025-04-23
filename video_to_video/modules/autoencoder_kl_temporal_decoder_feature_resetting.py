@@ -38,15 +38,15 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
         """
 
         feature_map_cur = {}
-        feature_map_cur["sample"] = sample.clone()
+        feature_map_cur["sample"] = sample[-frame_overlap_num:, :, :, :].clone()
 
         if is_first_batch:
             sample = self.conv_in(sample)
         else:
-            sample[:frame_overlap_num, :, :, :] = feature_map_prev["sample"][-frame_overlap_num:, :, :, :]
+            sample[:frame_overlap_num, :, :, :] = feature_map_prev["sample"]
             sample = self.conv_in(sample)
 
-        feature_map_cur["conv_in"] = sample.clone()
+        feature_map_cur["conv_in"] = sample[-frame_overlap_num:, :, :, :].clone()
 
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
         if self.training and self.gradient_checkpointing:
@@ -96,11 +96,11 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
             if is_first_batch:
                 sample = self.mid_block(sample, image_only_indicator=image_only_indicator)
             else:
-                sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_in"][-frame_overlap_num:, :, :, :]
+                sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_in"]
                 sample = self.mid_block(sample, image_only_indicator=image_only_indicator)
             sample = sample.to(upscale_dtype)
 
-            feature_map_cur["mid_block"] = sample.clone()
+            feature_map_cur["mid_block"] = sample[-frame_overlap_num:, :, :, :].clone()
 
             # up
             for i, up_block in enumerate(self.up_blocks):
@@ -108,16 +108,16 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
                     if is_first_batch:
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
                     else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"][-frame_overlap_num:, :, :,:]
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"]
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"] = [sample.clone()]
+                    feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone()]
                 else:
                     if is_first_batch:
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
                     else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1][-frame_overlap_num:,:, :, :]
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1]
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"].append(sample.clone())
+                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone())
                 # if is_first_batch:
                 #     sample = up_block(sample, image_only_indicator=image_only_indicator)
                 # else:
@@ -134,22 +134,22 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
 
-        feature_map_cur["conv_act"] = sample.clone()
+        feature_map_cur["conv_act"] = sample[-frame_overlap_num:, :, :, :].clone()
         if is_first_batch:
             sample = self.conv_out(sample)
         else:
-            sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_act"][-frame_overlap_num:, :, :, :]
+            sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_act"]
             sample = self.conv_out(sample)
 
         batch_frames, channels, height, width = sample.shape
         batch_size = batch_frames // num_frames
         sample = sample[None, :].reshape(batch_size, num_frames, channels, height, width).permute(0, 2, 1, 3, 4)
 
-        feature_map_cur["conv_out"] = sample.clone()
+        feature_map_cur["conv_out"] = sample[-frame_overlap_num:, :, :, :].clone()
         if is_first_batch:
             sample = self.time_conv_out(sample)
         else:
-            sample[:, :, :frame_overlap_num, :, :] = feature_map_prev["conv_out"][:, :, -frame_overlap_num:, :, :]
+            sample[:, :, :frame_overlap_num, :, :] = feature_map_prev["conv_out"]
             sample = self.time_conv_out(sample)
 
         sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)

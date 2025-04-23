@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+from math import ceil
 import random
 from typing import Any, Dict
 
@@ -179,27 +180,47 @@ class Vid2VidFr(VideoToVideo_sr):
 
         torch.cuda.empty_cache()
 
-    def vae_decode_fr(self, z, feature_map_prev, is_first_batch, frame_overlap_num):
+    def vae_decode_fr(self, z, z_prev, feature_map_prev, is_first_batch, out_win_step, out_win_overlap):
         z = rearrange(z, "b c f h w -> (b f) c h w")
-        video, feature_map_cur = self.vae.decode(z / self.vae.config.scaling_factor,
+        num_f = z.shape[0]
+        num_steps = int(ceil(num_f/out_win_step))
+        video = []
+        for i in range(num_steps):
+            # Only if both input & output 1st batch, is_first_batch is true
+            if i == 0 and is_first_batch:
+                is_first_batch = True
+                z_prev = z[0,:,:,:].repeat(out_win_overlap)
+            else:
+                is_first_batch = False
+            z_chunk = z[i*out_win_step:(i+1)*out_win_step,:,:,:]
+            z_chunk = torch.cat((z_prev, z_chunk), dim=0)
+            v, feature_map_cur = self.vae.decode(z_chunk / self.vae.config.scaling_factor,
                                                  feature_map_prev=feature_map_prev,
                                                  num_frames=z.shape[0],
                                                  is_first_batch=is_first_batch,
-                                                 frame_overlap_num=frame_overlap_num)
-        video = video.sample
-        return video, feature_map_cur
+                                                 out_win_step=out_win_step,
+                                                 out_win_overlap=out_win_overlap)
+            v = v.sample
+            video.append(v)
+            z_prev = z_chunk[-out_win_overlap:,:,:,:]
+
+        video = torch.cat(video)
+
+        return video, feature_map_cur, z_prev
 
 
     def infer(self,
-             input: Dict[str, Any],
-             feature_map_prev: Dict,
-             is_first_batch: bool = False,
-             frame_overlap_num: int = 1,
-             total_noise_levels=1000,
-             steps=50,
-             solver_mode='fast',
-             guide_scale=7.5,
-             max_chunk_len=32):
+              input: Dict[str, Any],
+              feature_map_prev: Dict,
+              z_prev,
+              is_first_batch: bool = False,
+              out_win_step:int=1,
+              out_win_overlap: int = 1,
+              total_noise_levels=1000,
+              steps=50,
+              solver_mode='fast',
+              guide_scale=7.5,
+              max_chunk_len=32):
         video_data = input['video_data']
         y = input['y']
         (target_h, target_w) = input['target_res']
@@ -250,10 +271,12 @@ class Vid2VidFr(VideoToVideo_sr):
             torch.cuda.empty_cache()
 
             logger.info(f'sampling, finished.')
-            vid_tensor_gen, feature_map_prev = self.vae_decode_fr(z=gen_vid,
-                                                                  feature_map_prev=feature_map_prev,
-                                                                  is_first_batch=is_first_batch,
-                                                                  frame_overlap_num=frame_overlap_num)
+            vid_tensor_gen, feature_map_prev, z_prev = self.vae_decode_fr(z=gen_vid,
+                                                                          z_prev=z_prev,
+                                                                          feature_map_prev=feature_map_prev,
+                                                                          is_first_batch=is_first_batch,
+                                                                          out_win_step=out_win_step,
+                                                                          out_win_overlap=out_win_overlap)
 
             logger.info(f'temporal vae decoding with feature resetting, finished.')
 
@@ -265,7 +288,7 @@ class Vid2VidFr(VideoToVideo_sr):
 
         torch.cuda.empty_cache()
 
-        return gen_video.type(torch.float32).cpu(), feature_map_prev
+        return gen_video.type(torch.float32).cpu(), feature_map_prev, z_prev
 
 
 def pad_to_fit(h, w):
