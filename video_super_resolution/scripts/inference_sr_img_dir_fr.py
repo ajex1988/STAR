@@ -145,59 +145,44 @@ class StarFR(STAR):
         print("Setting the model to Video2Video with Feature Resetting")
 
 
-    def enhance_dir_recur(self, input_frames_dir, prompt, win_step, win_overlap, color_cor_method="wavelet"):
+    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, out_win_step, out_win_overlap, color_cor_method="wavelet"):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
         For example, win_size = 5 and win_step = 3.
         Step1, pad two frames ahead. [f1, f1,] f1, f2, f3. Step2, f2, f3, f4, f5, [f5]
         """
-        assert win_step >= win_overlap, "window step should be no smaller than window overlap."
+        assert out_win_step >= out_win_overlap, "window step should be no smaller than window overlap."
 
         img_name_list = os.listdir(input_frames_dir)
         img_name_list.sort()
 
         n_frames = len(img_name_list)
-        n_steps = int(ceil(n_frames / win_step))
+        n_steps = int(ceil(n_frames / in_win_size))
         for w_i in range(n_steps):
-            w_start_idx = w_i * win_step
-            w_end_idx = w_start_idx + win_step if w_i != n_steps - 1 else n_frames
+            w_start_idx = w_i * in_win_size
+            w_end_idx = w_start_idx + in_win_size if w_i != n_steps - 1 else n_frames
             w_img_name_list = img_name_list[w_start_idx:w_end_idx]
 
             if w_i == 0:
                 is_first_batch = True
-                dummy_frame_list = [img_name_list[0] for i in range(win_overlap)]
-                w_img_name_list = dummy_frame_list + w_img_name_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
                 feature_map_prev = torch.zeros(0)
-            elif w_i == n_steps-1 and n_frames % win_step != 0:
-                is_first_batch = False
-                dummy_frame_list = [img_name_list[-1] for i in range(win_step-n_frames%win_step)]
-                w_img_name_list = w_img_name_list + dummy_frame_list
-                frames = load_frames(input_frames_dir, w_img_name_list)
             else:
                 is_first_batch = False
-                dummy_frame_list = img_name_list[w_start_idx-win_overlap:w_start_idx]
-                w_img_name_list = dummy_frame_list + w_img_name_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
 
             video_sr, feature_map_prev = self.enhance_a_video_fr(input_frames=frames,
                                                                  feature_map_prev=feature_map_prev,
                                                                  is_first_batch=is_first_batch,
-                                                                 overlap_frame_num=win_overlap,
+                                                                 overlap_frame_num=out_win_overlap,
                                                                  prompt=prompt,
                                                                  color_cor_method=color_cor_method)
 
             image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
-            if w_i==n_steps-1:
-                save_frame_list = image_sr_list[:n_frames%win_step]
-                save_name_list = w_img_name_list[:n_frames%win_step]
-            else:
-                save_frame_list = image_sr_list[-win_step:]
-                save_name_list = w_img_name_list[-win_step:]
-            for i in range(len(save_name_list)):
-                out_path = os.path.join(self.result_dir, save_name_list[i])
-                cv2.imwrite(out_path, save_frame_list[i])
+            for i in range(len(w_img_name_list)):
+                out_path = os.path.join(self.result_dir, w_img_name_list[i])
+                cv2.imwrite(out_path, image_sr_list[i])
 
     def enhance_a_video_fr(self,
                            input_frames,
@@ -267,8 +252,9 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=15)
 
 
-    parser.add_argument("--win_step", type=int, default=2)
-    parser.add_argument("--win_overlap", type=int, default=1)
+    parser.add_argument("--in_win_size", type=int, default=12, help="Window size of encoder & DM")
+    parser.add_argument("--out_win_step", type=int, default=2, help="Window step of decoder")
+    parser.add_argument("--out_win_overlap", type=int, default=1, help="Window overlap of decoder")
     parser.add_argument("--color_cor_method", type=str, default="wavelet")
 
     return parser.parse_args()
