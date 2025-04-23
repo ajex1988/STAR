@@ -154,6 +154,8 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
         sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)
 
+        torch.cuda.empty_cache()
+
         return sample, feature_map_cur
 
 class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder):

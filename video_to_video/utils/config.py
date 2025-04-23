@@ -169,10 +169,10 @@ hyper detailed photo - realistic maximum detail, 32k, Color Grading, ultra HD, e
 skin pore detailing, hyper sharpness, perfect without deformations.'
 
 # debug. Check if prompt lead to temporal unstability
-cfg.negative_prompt = 'flicker, rapid texture change between neighborhood frames, blurring, dirty, messy, worst quality, low quality.painting, oil painting, illustration, drawing, art, sketch, oil painting, cartoon, \
-CG Style, 3D render, unreal engine, blurring, dirty, messy, worst quality, low quality, frames, watermark, \
-signature, jpeg artifacts, deformed, lowres, over-smooth'
-
-cfg.positive_prompt = 'Consistent texture across frames, stable, temporal consistency, smooth across frames. Cinematic, High Contrast, highly detailed, taken using a Canon EOS R camera,   \
-hyper detailed photo - realistic maximum detail, 32k, Color Grading, ultra HD, extreme meticulous detailing,  \
-skin pore detailing, hyper sharpness, perfect without deformations.'
+# cfg.negative_prompt = 'flicker, rapid texture change between neighborhood frames, blurring, dirty, messy, worst quality, low quality.painting, oil painting, illustration, drawing, art, sketch, oil painting, cartoon, \
+# CG Style, 3D render, unreal engine, blurring, dirty, messy, worst quality, low quality, frames, watermark, \
+# signature, jpeg artifacts, deformed, lowres, over-smooth'
+#
+# cfg.positive_prompt = 'Consistent texture across frames, stable, temporal consistency, smooth across frames. Cinematic, High Contrast, highly detailed, taken using a Canon EOS R camera,   \
+# hyper detailed photo - realistic maximum detail, 32k, Color Grading, ultra HD, extreme meticulous detailing,  \
+# skin pore detailing, hyper sharpness, perfect without deformations.'

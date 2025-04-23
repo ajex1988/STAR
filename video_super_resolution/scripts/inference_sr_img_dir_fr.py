@@ -181,7 +181,7 @@ class StarFR(STAR):
                 w_img_name_list = dummy_frame_list + w_img_name_list
                 frames = load_frames(input_frames_dir, w_img_name_list)
 
-            video_sr, feature_map_prev = self.enhance_a_video_fm(input_frames=frames,
+            video_sr, feature_map_prev = self.enhance_a_video_fr(input_frames=frames,
                                                                  feature_map_prev=feature_map_prev,
                                                                  is_first_batch=is_first_batch,
                                                                  overlap_frame_num=win_overlap,
@@ -199,7 +199,7 @@ class StarFR(STAR):
                 out_path = os.path.join(self.result_dir, save_name_list[i])
                 cv2.imwrite(out_path, save_frame_list[i])
 
-    def enhance_a_video_fm(self,
+    def enhance_a_video_fr(self,
                            input_frames,
                            feature_map_prev,
                            is_first_batch,
