@@ -177,7 +177,8 @@ class StarFR(STAR):
                                                                          feature_map_prev=feature_map_prev,
                                                                          z_prev=z_prev,
                                                                          is_first_batch=is_first_batch,
-                                                                         overlap_frame_num=out_win_overlap,
+                                                                         out_win_step=out_win_step,
+                                                                         out_win_overlap=out_win_overlap,
                                                                          prompt=prompt,
                                                                          color_cor_method=color_cor_method)
 
