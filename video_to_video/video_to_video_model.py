@@ -189,24 +189,23 @@ class Vid2VidFr(VideoToVideo_sr):
             # Only if both input & output 1st batch, is_first_batch is true
             if i == 0 and is_first_batch:
                 is_first_batch = True
-                z_prev = z[0,:,:,:].repeat(out_win_overlap)
+                z_prev = z[0,:,:,:].repeat(out_win_overlap,1,1,1)
             else:
                 is_first_batch = False
             z_chunk = z[i*out_win_step:(i+1)*out_win_step,:,:,:]
             z_chunk = torch.cat((z_prev, z_chunk), dim=0)
-            v, feature_map_cur = self.vae.decode(z_chunk / self.vae.config.scaling_factor,
+            v, feature_map_prev = self.vae.decode(z_chunk / self.vae.config.scaling_factor,
                                                  feature_map_prev=feature_map_prev,
-                                                 num_frames=z.shape[0],
+                                                 num_frames=z_chunk.shape[0],
                                                  is_first_batch=is_first_batch,
-                                                 out_win_step=out_win_step,
-                                                 out_win_overlap=out_win_overlap)
+                                                 frame_overlap_num=out_win_overlap)
             v = v.sample
-            video.append(v)
+            video.append(v[-out_win_step:,:,:,:]) # only save the win_step frames
             z_prev = z_chunk[-out_win_overlap:,:,:,:]
 
         video = torch.cat(video)
 
-        return video, feature_map_cur, z_prev
+        return video, feature_map_prev, z_prev
 
 
     def infer(self,
