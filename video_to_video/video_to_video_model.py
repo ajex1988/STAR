@@ -200,8 +200,8 @@ class Vid2VidFr(VideoToVideo_sr):
                                                  is_first_batch=is_first_batch,
                                                  frame_overlap_num=out_win_overlap)
             v = v.sample
-            video.append(v[-out_win_step:,:,:,:]) # only save the win_step frames
-            z_prev = z_chunk[-out_win_overlap:,:,:,:]
+            video.append(v[out_win_overlap:,:,:,:]) # handle corner case
+            z_prev = z_chunk[-out_win_overlap:,:,:,:] #always ensure out_win_overlap win size
 
         video = torch.cat(video)
 
