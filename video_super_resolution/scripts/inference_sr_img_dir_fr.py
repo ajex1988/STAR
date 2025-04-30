@@ -127,7 +127,8 @@ class StarFR(STAR):
                  solver_mode='fast',
                  steps=15,
                  guide_scale=7.5,
-                 upscale=4
+                 upscale=4,
+                 device=torch.device(f'cuda:0')
                  ):
         super(StarFR, self).__init__(result_dir=result_dir,
                                      model_path=model_path,
@@ -141,11 +142,11 @@ class StarFR(STAR):
         print("STAR with Feature Resetting trick")
         model_cfg = EasyDict(__name__='model_cfg')
         model_cfg.model_path = self.model_path
-        self.model = Vid2VidFr(model_cfg)
+        self.model = Vid2VidFr(model_cfg, device=device)
         print("Setting the model to Video2Video with Feature Resetting")
 
 
-    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, out_win_step, out_win_overlap, color_cor_method="wavelet"):
+    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, out_win_step, out_win_overlap, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
@@ -195,7 +196,8 @@ class StarFR(STAR):
                            out_win_step,
                            out_win_overlap,
                            prompt,
-                           color_cor_method):
+                           color_cor_method,
+                           device=torch.device(f'cuda:0')):
         """
         Enhance a video volume conditioned on previous volume's output feature maps.
         This trick aims at aligning the sr videos based on previous processed frames.
@@ -217,7 +219,7 @@ class StarFR(STAR):
         setup_seed(666)
 
         with torch.no_grad():
-            data_tensor = collate_fn(pre_data, 'cuda:0')
+            data_tensor = collate_fn(pre_data, device=device)
             output, feature_map_prev, z_prev = self.model.infer(input=data_tensor,
                                                         feature_map_prev=feature_map_prev,
                                                         z_prev=z_prev,
@@ -264,6 +266,8 @@ def parse_args():
     parser.add_argument("--out_win_overlap", type=int, default=1, help="Window overlap of decoder")
     parser.add_argument("--color_cor_method", type=str, default="wavelet")
 
+    parser.add_argument("--device", type=str, default='cuda:0') # Add support for CPU because RAM sufficient
+
     return parser.parse_args()
 
 
@@ -286,23 +290,26 @@ def main():
     solver_mode = args.solver_mode
     guide_scale = args.cfg
 
+    device = args.device
+
     assert solver_mode in ('fast', 'normal')
 
     starfr = StarFR(
-                result_dir=save_dir,
-                model_path=model_path,
-                solver_mode=solver_mode,
-                steps=steps,
-                guide_scale=guide_scale,
-                upscale=upscale
-                )
+        result_dir=save_dir,
+        model_path=model_path,
+        solver_mode=solver_mode,
+        steps=steps,
+        guide_scale=guide_scale,
+        upscale=upscale,
+        device=device)
 
     starfr.enhance_dir_recur(input_frames_dir=input_path,
                              prompt=prompt,
                              in_win_size=in_win_size,
                              out_win_step=out_win_step,
                              out_win_overlap=out_win_overlap,
-                             color_cor_method=color_cor_method)
+                             color_cor_method=color_cor_method,
+                             device=device)
 
 
 if __name__ == '__main__':
