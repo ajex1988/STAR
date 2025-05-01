@@ -28,7 +28,8 @@ class STAR():
                  guide_scale=7.5,
                  upscale=4,
                  max_chunk_len=32,
-                 vae_decoder_chunk_size=3
+                 vae_decoder_chunk_size=3,
+                 device=torch.device(f'cuda:0')
                  ):
         self.model_path=model_path
         logger.info('checkpoint_path: {}'.format(self.model_path))
@@ -38,7 +39,13 @@ class STAR():
 
         model_cfg = EasyDict(__name__='model_cfg')
         model_cfg.model_path = self.model_path
-        self.model = VideoToVideo_sr(model_cfg)
+        self.model = VideoToVideo_sr(model_cfg, device=device)
+
+        if device == torch.device('cpu'):
+            # Use fp32 in the cpu mode
+            self.model.generator = self.model.generator.float()
+            self.model.text_encoder = self.model.text_encoder.float()
+            self.model.vae = self.model.vae.float()
 
         steps = 15 if solver_mode == 'fast' else steps
         self.solver_mode=solver_mode
@@ -137,12 +144,18 @@ class StarFR(STAR):
                                      guide_scale=guide_scale,
                                      upscale=upscale,
                                      max_chunk_len=32,
-                                     vae_decoder_chunk_size=3
+                                     vae_decoder_chunk_size=3,
+                                     device=device
                                      )
         print("STAR with Feature Resetting trick")
         model_cfg = EasyDict(__name__='model_cfg')
         model_cfg.model_path = self.model_path
         self.model = Vid2VidFr(model_cfg, device=device)
+        if device == torch.device('cpu'):
+            # Use fp32 in the cpu mode
+            self.model.generator = self.model.generator.float()
+            self.model.text_encoder = self.model.text_encoder.float()
+            self.model.vae = self.model.vae.float()
         print("Setting the model to Video2Video with Feature Resetting")
 
 
@@ -181,7 +194,8 @@ class StarFR(STAR):
                                                                          out_win_step=out_win_step,
                                                                          out_win_overlap=out_win_overlap,
                                                                          prompt=prompt,
-                                                                         color_cor_method=color_cor_method)
+                                                                         color_cor_method=color_cor_method,
+                                                                         device=device)
 
             image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
             for i in range(len(w_img_name_list)):
@@ -290,7 +304,7 @@ def main():
     solver_mode = args.solver_mode
     guide_scale = args.cfg
 
-    device = args.device
+    device = torch.device(args.device)
 
     assert solver_mode in ('fast', 'normal')
 

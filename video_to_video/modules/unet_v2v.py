@@ -155,6 +155,8 @@ class MemoryEfficientCrossAttention(nn.Module):
             nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
 
+        self.multihead_attn = nn.MultiheadAttention(embed_dim=dim_head, num_heads=heads)
+
     def forward(self, x, context=None, mask=None):
         q = self.to_q(x)
         context = default(context, x)
