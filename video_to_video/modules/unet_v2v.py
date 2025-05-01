@@ -155,7 +155,6 @@ class MemoryEfficientCrossAttention(nn.Module):
             nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
 
-        self.multihead_attn = nn.MultiheadAttention(embed_dim=dim_head, num_heads=heads)
 
     def forward(self, x, context=None, mask=None):
         q = self.to_q(x)
@@ -178,13 +177,19 @@ class MemoryEfficientCrossAttention(nn.Module):
             v_list = torch.chunk(v, v.shape[0] // self.max_bs, dim=0)
             out_list = []
             for q_1, k_1, v_1 in zip(q_list, k_list, v_list):
-                out = xformers.ops.memory_efficient_attention(
-                    q_1, k_1, v_1, attn_bias=None, op=self.attention_op)
+                if q.is_cuda:
+                    out = xformers.ops.memory_efficient_attention(
+                        q_1, k_1, v_1, attn_bias=None, op=self.attention_op)
+                else:
+                    out = F.scaled_dot_product_attention(q_1, k_1, v_1)
                 out_list.append(out)
             out = torch.cat(out_list, dim=0)
         else:
-            out = xformers.ops.memory_efficient_attention(
-                q, k, v, attn_bias=None, op=self.attention_op)
+            if q.is_cuda:
+                out = xformers.ops.memory_efficient_attention(
+                    q, k, v, attn_bias=None, op=self.attention_op)
+            else:
+                out = F.scaled_dot_product_attention(q, k, v)
 
         if exists(mask):
             raise NotImplementedError
