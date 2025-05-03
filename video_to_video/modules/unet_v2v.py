@@ -13,6 +13,8 @@ from einops import rearrange
 from fairscale.nn.checkpoint import checkpoint_wrapper
 from timm.models.vision_transformer import Mlp
 
+from memory_efficient_attention_pytorch.flash_attention import FlashAttentionFunction
+
 
 USE_TEMPORAL_TRANSFORMER = True
 
@@ -156,6 +158,7 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.attention_op: Optional[Any] = None
 
 
+
     def forward(self, x, context=None, mask=None):
         q = self.to_q(x)
         context = default(context, x)
@@ -181,7 +184,12 @@ class MemoryEfficientCrossAttention(nn.Module):
                     out = xformers.ops.memory_efficient_attention(
                         q_1, k_1, v_1, attn_bias=None, op=self.attention_op)
                 else:
-                    out = F.scaled_dot_product_attention(q_1, k_1, v_1)
+                    mask = torch.ones(1, x.shape[1]).bool()
+                    causal = False
+                    q_bucket_size = 64
+                    k_bucket_size = 64
+                    out = FlashAttentionFunction.apply(q_1,k_1,v_1,mask,causal,q_bucket_size,k_bucket_size)
+                    # out = F.scaled_dot_product_attention(q_1, k_1, v_1)
                 out_list.append(out)
             out = torch.cat(out_list, dim=0)
         else:
@@ -189,7 +197,12 @@ class MemoryEfficientCrossAttention(nn.Module):
                 out = xformers.ops.memory_efficient_attention(
                     q, k, v, attn_bias=None, op=self.attention_op)
             else:
-                out = F.scaled_dot_product_attention(q, k, v)
+                mask = torch.ones(1, x.shape[1]).bool()
+                causal = False
+                q_bucket_size = 64
+                k_bucket_size = 64
+                out = FlashAttentionFunction.apply(q,k,v,mask,causal,q_bucket_size,k_bucket_size)
+                # out = F.scaled_dot_product_attention(q, k, v)
 
         if exists(mask):
             raise NotImplementedError
