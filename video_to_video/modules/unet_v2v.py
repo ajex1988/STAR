@@ -184,11 +184,15 @@ class MemoryEfficientCrossAttention(nn.Module):
                     out = xformers.ops.memory_efficient_attention(
                         q_1, k_1, v_1, attn_bias=None, op=self.attention_op)
                 else:
-                    mask = torch.ones(1, x.shape[1]).bool()
+                    m = torch.ones(1, x.shape[1]).bool()
                     causal = False
                     q_bucket_size = 64
                     k_bucket_size = 64
-                    out = FlashAttentionFunction.apply(q_1,k_1,v_1,mask,causal,q_bucket_size,k_bucket_size)
+                    q_1 = q_1[None, :,:,:]
+                    k_1 = k_1[None, :,:,:]
+                    v_1 = v_1[None, :,:,:]
+                    out = FlashAttentionFunction.apply(q_1,k_1,v_1,m,causal,q_bucket_size,k_bucket_size)
+                    out = out[0]
                     # out = F.scaled_dot_product_attention(q_1, k_1, v_1)
                 out_list.append(out)
             out = torch.cat(out_list, dim=0)
@@ -197,11 +201,15 @@ class MemoryEfficientCrossAttention(nn.Module):
                 out = xformers.ops.memory_efficient_attention(
                     q, k, v, attn_bias=None, op=self.attention_op)
             else:
-                mask = torch.ones(1, x.shape[1]).bool()
+                m = torch.ones(1, x.shape[1]).bool()
                 causal = False
                 q_bucket_size = 64
                 k_bucket_size = 64
-                out = FlashAttentionFunction.apply(q,k,v,mask,causal,q_bucket_size,k_bucket_size)
+                q = q[None, :, :, :]
+                k = k[None, :, :, :]
+                v = v[None, :, :, :]
+                out = FlashAttentionFunction.apply(q,k,v,m,causal,q_bucket_size,k_bucket_size)
+                out = out[0]
                 # out = F.scaled_dot_product_attention(q, k, v)
 
         if exists(mask):
