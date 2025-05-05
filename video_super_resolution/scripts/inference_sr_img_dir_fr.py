@@ -159,7 +159,7 @@ class StarFR(STAR):
         print("Setting the model to Video2Video with Feature Resetting")
 
 
-    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, out_win_step, out_win_overlap, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
+    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, in_win_step, out_win_step, out_win_overlap, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
@@ -172,9 +172,9 @@ class StarFR(STAR):
         img_name_list.sort()
 
         n_frames = len(img_name_list)
-        n_steps = int(ceil(n_frames / in_win_size))
+        n_steps = int(ceil((n_frames-in_win_size) / in_win_step)) + 1
         for w_i in range(n_steps):
-            w_start_idx = w_i * in_win_size
+            w_start_idx = w_i * in_win_size if w_i != n_steps - 1 else n_steps - in_win_size
             w_end_idx = w_start_idx + in_win_size if w_i != n_steps - 1 else n_frames
             w_img_name_list = img_name_list[w_start_idx:w_end_idx]
 
@@ -278,6 +278,7 @@ def parse_args():
 
 
     parser.add_argument("--in_win_size", type=int, default=12, help="Window size of encoder & DM")
+    parser.add_argument("--in_win_step", type=int, default=6, help="Window step of encoder & DM")
     parser.add_argument("--out_win_step", type=int, default=1, help="Window step of decoder")
     parser.add_argument("--out_win_overlap", type=int, default=1, help="Window overlap of decoder")
     parser.add_argument("--color_cor_method", type=str, default="wavelet")
@@ -298,6 +299,7 @@ def main():
     upscale = args.upscale
 
     in_win_size = args.in_win_size
+    in_win_step = args.in_win_step
     out_win_step = args.out_win_step
     out_win_overlap = args.out_win_overlap
     color_cor_method = args.color_cor_method
@@ -309,6 +311,7 @@ def main():
     device = torch.device(args.device)
 
     assert solver_mode in ('fast', 'normal')
+    assert in_win_size >= in_win_step
 
     starfr = StarFR(
         result_dir=save_dir,
@@ -322,6 +325,7 @@ def main():
     starfr.enhance_dir_recur(input_frames_dir=input_path,
                              prompt=prompt,
                              in_win_size=in_win_size,
+                             in_win_step=in_win_step,
                              out_win_step=out_win_step,
                              out_win_overlap=out_win_overlap,
                              color_cor_method=color_cor_method,
