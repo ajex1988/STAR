@@ -14,6 +14,7 @@ from fairscale.nn.checkpoint import checkpoint_wrapper
 from timm.models.vision_transformer import Mlp
 
 from memory_efficient_attention_pytorch.flash_attention import FlashAttentionFunction
+from memory_efficient_attention_pytorch.memory_efficient_attention import attention
 
 
 USE_TEMPORAL_TRANSFORMER = True
@@ -184,14 +185,16 @@ class MemoryEfficientCrossAttention(nn.Module):
                     out = xformers.ops.memory_efficient_attention(
                         q_1, k_1, v_1, attn_bias=None, op=self.attention_op)
                 else:
-                    m = torch.ones(1, x.shape[1]).bool()
+                    m = None
                     causal = False
-                    q_bucket_size = 64
-                    k_bucket_size = 64
+                    # q_bucket_size = 64
+                    # k_bucket_size = 64
                     q_1 = q_1[None, :,:,:]
                     k_1 = k_1[None, :,:,:]
                     v_1 = v_1[None, :,:,:]
-                    out = FlashAttentionFunction.apply(q_1,k_1,v_1,m,causal,q_bucket_size,k_bucket_size)
+                    # out = FlashAttentionFunction.apply(q_1,k_1,v_1,m,causal,q_bucket_size,k_bucket_size)
+                    # out = out[0]
+                    out = attention(q_1, k_1, v_1, m, causal)
                     out = out[0]
                     # out = F.scaled_dot_product_attention(q_1, k_1, v_1)
                 out_list.append(out)
@@ -201,14 +204,16 @@ class MemoryEfficientCrossAttention(nn.Module):
                 out = xformers.ops.memory_efficient_attention(
                     q, k, v, attn_bias=None, op=self.attention_op)
             else:
-                m = torch.ones(1, x.shape[1]).bool()
+                m = None
                 causal = False
-                q_bucket_size = 64
-                k_bucket_size = 64
+                # q_bucket_size = 64
+                # k_bucket_size = 64
                 q = q[None, :, :, :]
                 k = k[None, :, :, :]
                 v = v[None, :, :, :]
-                out = FlashAttentionFunction.apply(q,k,v,m,causal,q_bucket_size,k_bucket_size)
+                # out = FlashAttentionFunction.apply(q,k,v,m,causal,q_bucket_size,k_bucket_size)
+                # out = out[0]
+                out = attention(q, k, v, m, causal)
                 out = out[0]
                 # out = F.scaled_dot_product_attention(q, k, v)
 

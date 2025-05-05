@@ -252,6 +252,8 @@ class StarFR(STAR):
         if color_cor_method == "adain":
             output = adain_color_fix(output, video_data)
         elif color_cor_method == "wavelet":
+            from torch.nn import functional as F
+            video_data = F.interpolate(video_data, [target_h, target_w], mode='bilinear')
             output = wavelet_color_fix(output, video_data)
         else:
             raise NotImplementedError("Color correction method not implemented.")
