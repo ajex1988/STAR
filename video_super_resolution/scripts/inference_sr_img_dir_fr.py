@@ -174,7 +174,7 @@ class StarFR(STAR):
         n_frames = len(img_name_list)
         n_steps = int(ceil((n_frames-in_win_size) / in_win_step)) + 1
         for w_i in range(n_steps):
-            w_start_idx = w_i * in_win_size if w_i != n_steps - 1 else n_steps - in_win_size
+            w_start_idx = w_i * in_win_size if w_i != n_steps - 1 else n_frames - in_win_size
             w_end_idx = w_start_idx + in_win_size if w_i != n_steps - 1 else n_frames
             w_img_name_list = img_name_list[w_start_idx:w_end_idx]
 
