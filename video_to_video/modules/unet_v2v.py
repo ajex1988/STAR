@@ -14,7 +14,7 @@ from fairscale.nn.checkpoint import checkpoint_wrapper
 from timm.models.vision_transformer import Mlp
 
 from memory_efficient_attention_pytorch.flash_attention import FlashAttentionFunction
-from memory_efficient_attention_pytorch.memory_efficient_attention import attention
+from memory_efficient_attention_pytorch.memory_efficient_attention import memory_efficient_attention
 
 
 USE_TEMPORAL_TRANSFORMER = True
@@ -194,7 +194,7 @@ class MemoryEfficientCrossAttention(nn.Module):
                     v_1 = v_1[None, :,:,:]
                     # out = FlashAttentionFunction.apply(q_1,k_1,v_1,m,causal,q_bucket_size,k_bucket_size)
                     # out = out[0]
-                    out = attention(q_1, k_1, v_1, m, causal)
+                    out = memory_efficient_attention(q_1, k_1, v_1, m, causal)
                     out = out[0]
                     # out = F.scaled_dot_product_attention(q_1, k_1, v_1)
                 out_list.append(out)
@@ -213,7 +213,7 @@ class MemoryEfficientCrossAttention(nn.Module):
                 v = v[None, :, :, :]
                 # out = FlashAttentionFunction.apply(q,k,v,m,causal,q_bucket_size,k_bucket_size)
                 # out = out[0]
-                out = attention(q, k, v, m, causal)
+                out = memory_efficient_attention(q, k, v, m, causal)
                 out = out[0]
                 # out = F.scaled_dot_product_attention(q, k, v)
 
