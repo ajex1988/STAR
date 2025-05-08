@@ -17,7 +17,8 @@ from video_super_resolution.color_fix import adain_color_fix
 from inference_utils import *
 
 from torch.profiler import profile, record_function, ProfilerActivity
-from torchtnt.utils.flops import FlopTensorDispatchMode
+
+import copy
 
 logger = get_logger()
 
@@ -71,6 +72,48 @@ class STAR():
         for i in range(len(save_name_list)):
             out_path = os.path.join(self.result_dir, save_name_list[i])
             cv2.imwrite(out_path, save_frame_list[i])
+
+    def cal_flops(self):
+        from calflops import calculate_flops
+        flops_vae, macs_vae, params_vae = calculate_flops(model=self.model.vae,
+                                              input_shape=(1, 3, 1936, 2944))
+        print(self.model.device)
+        inputs = {}
+        inputs['x'] = torch.zeros(1, 4, 1, 32, 32).to(self.model.device)
+        inputs['t'] = torch.zeros(1, ).to(self.model.device)
+        inputs['y'] = torch.zeros(1, 77, 1024).to(self.model.device)
+        inputs['hint'] = torch.zeros(1, 4, 1, 32, 32).to(self.model.device)
+        # inputs['x'] = torch.zeros(1, 4, 1, 242, 368).to(self.model.device)
+        # inputs['t'] = torch.zeros(1,).to(self.model.device)
+        # inputs['y'] = torch.zeros(1, 77, 1024).to(self.model.device)
+        # inputs['hint'] = torch.zeros(1, 4, 1, 242, 368).to(self.model.device)
+
+
+        flops_dm, macs_dm, params_dm = calculate_flops(model=self.model.generator,
+                                                       kwargs=inputs)
+
+        print(f"VAE FLOPs {flops_vae}")
+        print(f"DM FLOPSs: {flops_dm}")
+        print(f"Total FLOPS: {flops_dm+flops_vae}")
+
+    def cal_flops2(self):
+        from torchtnt.utils.flops import FlopTensorDispatchMode
+        dm = self.model.generator.float()
+        dm_input = {}
+        dm_input['x'] = torch.zeros(1, 4, 1, 242, 368).to(self.model.device)
+        dm_input['t'] = torch.zeros(1,).to(self.model.device)
+        dm_input['y'] = torch.zeros(1, 77, 1024).to(self.model.device)
+        dm_input['hint'] = torch.zeros(1, 4, 1, 242, 368).to(self.model.device)
+        sum = 0
+        with FlopTensorDispatchMode(dm) as ftdm:
+            result = dm(**dm_input)
+            flops_dm = copy.deepcopy(ftdm.flop_counts)
+            for t in flops_dm:
+                for tt in flops_dm[t]:
+                    sum += flops_dm[t][tt]
+            print(f"DM FLOPS:{sum}")
+
+
 
     def enhance_a_video(self, input_frames, input_fps, prompt, profiling_log_dir='./'):
         text = prompt
@@ -195,11 +238,7 @@ def main():
                 vae_decoder_chunk_size=vae_decoder_chunk_size,
                 )
 
-    star.enhance_dir(input_frames_dir=input_path,
-                     input_fps=args.input_fps,
-                     prompt=prompt,
-                     in_win_size=in_win_size,
-                     profiling_log_dir=profiling_log_dir)
+    star.cal_flops2()
 
 
 if __name__ == '__main__':
