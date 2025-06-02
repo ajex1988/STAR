@@ -159,7 +159,8 @@ class StarFR(STAR):
         print("Setting the model to Video2Video with Feature Resetting")
 
 
-    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, in_win_step, out_win_step, out_win_overlap, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
+    def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, in_win_step, out_win_step, out_win_overlap,
+                          max_chunk_len=32, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
@@ -194,6 +195,7 @@ class StarFR(STAR):
                                                                          out_win_step=out_win_step,
                                                                          out_win_overlap=out_win_overlap,
                                                                          prompt=prompt,
+                                                                         max_chunk_len=max_chunk_len,
                                                                          color_cor_method=color_cor_method,
                                                                          device=device)
 
@@ -210,6 +212,7 @@ class StarFR(STAR):
                            out_win_step,
                            out_win_overlap,
                            prompt,
+                           max_chunk_len,
                            color_cor_method,
                            device=torch.device(f'cuda:0')):
         """
@@ -243,7 +246,8 @@ class StarFR(STAR):
                                                         total_noise_levels=total_noise_levels,
                                                         steps=self.steps,
                                                         solver_mode=self.solver_mode,
-                                                        guide_scale=self.guide_scale
+                                                        guide_scale=self.guide_scale,
+                                                        max_chunk_len=max_chunk_len
                                                         )
 
         output = tensor2vid(output)
@@ -308,6 +312,7 @@ def main():
     solver_mode = args.solver_mode
     guide_scale = args.cfg
 
+    max_chunk_len = args.max_chunk_len
     device = torch.device(args.device)
 
     assert solver_mode in ('fast', 'normal')
@@ -328,6 +333,7 @@ def main():
                              in_win_step=in_win_step,
                              out_win_step=out_win_step,
                              out_win_overlap=out_win_overlap,
+                             max_chunk_len=max_chunk_len,
                              color_cor_method=color_cor_method,
                              device=device)
 
