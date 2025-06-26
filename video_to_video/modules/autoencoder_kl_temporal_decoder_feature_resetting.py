@@ -112,10 +112,19 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
                     feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone()]
                 else:
-                    if torch.cuda.device_count() >= 3:
-                        up_block = up_block.to('cuda:1')
-                        sample = sample.to('cuda:1')
+                    if torch.cuda.device_count() == 4:
+                        if i == 1:
+                            up_block = up_block.to('cuda:0')
+                            sample = sample.to('cuda:0')
+                        elif i == 2:
+                            up_block = up_block.to('cuda:1')
+                            sample = sample.to('cuda:1')
+                        elif i == 3:
+                            up_block = up_block.to('cpu')
+                            sample = sample.to('cpu')
                     if is_first_batch:
+                        if sample.device.type == 'cpu':
+                            sample = sample.to(torch.float32)
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
                     else:
                         sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1]
@@ -134,7 +143,7 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
                 #         feature_map_cur["up_block"].append(sample.clone())
 
         # post-process
-        if torch.cuda.device_count() >= 3:
+        if torch.cuda.device_count() == 4:
             sample = sample.to('cuda:2')
             sample = self.conv_norm_out.to('cuda:2')(sample)
             sample = self.conv_act.to('cuda:2')(sample)
@@ -144,13 +153,13 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
         feature_map_cur["conv_act"] = sample[-frame_overlap_num:, :, :, :].clone()
         if is_first_batch:
-            if torch.cuda.device_count() >= 3:
+            if torch.cuda.device_count() == 4:
                 sample = self.conv_out.to('cuda:2')(sample)
             else:
                 sample = self.conv_out(sample)
         else:
             sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_act"]
-            if torch.cuda.device_count() >= 3:
+            if torch.cuda.device_count() == 4:
                 sample = self.conv_out.to('cuda:2')(sample)
             else:
                 sample = self.conv_out(sample)
@@ -161,13 +170,13 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
         feature_map_cur["conv_out"] = sample[:, :, -frame_overlap_num:, :,:].clone()
         if is_first_batch:
-            if torch.cuda.device_count() >= 3:
+            if torch.cuda.device_count() == 4:
                 sample = self.time_conv_out.to('cuda:2')(sample)
             else:
                 sample = self.time_conv_out(sample)
         else:
             sample[:, :, :frame_overlap_num, :, :] = feature_map_prev["conv_out"]
-            if torch.cuda.device_count() >= 3:
+            if torch.cuda.device_count() == 4:
                 sample = self.time_conv_out.to('cuda:2')(sample)
             else:
                 sample = self.time_conv_out(sample)
