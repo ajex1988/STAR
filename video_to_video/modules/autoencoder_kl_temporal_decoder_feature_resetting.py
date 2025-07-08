@@ -126,11 +126,15 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
                         if sample.device.type == 'cpu':
                             sample = sample.to(torch.float32)
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
+                        if sample.device.type == 'cpu':
+                            sample = sample.to(torch.float16)
                     else:
                         sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1]
                         if sample.device.type == 'cpu':
                             sample = sample.to(torch.float32)
                         sample = up_block(sample, image_only_indicator=image_only_indicator)
+                        if sample.device.type == 'cpu':
+                            sample = sample.to(torch.float16)
                     feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone())
                 # if is_first_batch:
                 #     sample = up_block(sample, image_only_indicator=image_only_indicator)
