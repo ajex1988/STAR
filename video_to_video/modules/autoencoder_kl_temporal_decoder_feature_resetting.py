@@ -1,5 +1,7 @@
 import torch
+import math
 from typing import Dict, Optional, Tuple, Union
+import numpy as np
 
 from diffusers import AutoencoderKLTemporalDecoder
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
@@ -193,6 +195,104 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
         return sample, feature_map_cur
 
+
+class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
+    """
+    Tiled version of TemporalDecoderFeatureResetting
+    """
+
+    def __init__(
+            self,
+            in_channels: int = 4,
+            out_channels: int = 3,
+            block_out_channels: Tuple[int] = (128, 256, 512, 512),
+            layers_per_block: int = 2,
+            tile_size: int = 256,
+            pad: int = 11,  ):
+        super(TiledTemporalDecoderFeatureResetting, self).__init__(in_channels=in_channels,
+                                                                   out_channels=out_channels,
+                                                                   block_out_channels=block_out_channels,
+                                                                   layers_per_block=layers_per_block)
+        self.tile_size = tile_size
+        self.pad = pad
+
+    def _get_best_tile_size(self, lowerbound, upperbound):
+        """
+        Get the best tile size for GPU memory
+        """
+        divider = 32
+        while divider >= 2:
+            remainer = lowerbound % divider
+            if remainer == 0:
+                return lowerbound
+            candidate = lowerbound - remainer + divider
+            if candidate <= upperbound:
+                return candidate
+            divider //= 2
+        return lowerbound
+
+    def _split_tiles(self, h, w, scale=8):
+        """
+        Split the feature map into tiles.
+        @param h, w: height and width of the feature map
+        @param scale: scaling factor for h and w.
+        @return: tile_in_bboxes, tile_out_bboxes
+        """
+        tile_size = self.tile_size
+        pad = self.pad
+        num_height_tiles = math.ceil((h - 2 * pad) / tile_size)
+        num_width_tiles = math.ceil((w - 2 * pad) / tile_size)
+        # If any of the numbers are 0, we let it be 1
+        # This is to deal with long and thin images
+        num_height_tiles = max(num_height_tiles, 1)
+        num_width_tiles = max(num_width_tiles, 1)
+
+        # Suggestions from https://github.com/Kahsolt: auto shrink the tile size
+        real_tile_height = math.ceil((h - 2 * pad) / num_height_tiles)
+        real_tile_width = math.ceil((w - 2 * pad) / num_width_tiles)
+        real_tile_height = self._get_best_tile_size(real_tile_height, tile_size)
+        real_tile_width = self._get_best_tile_size(real_tile_width, tile_size)
+
+        print(
+            f'[Tiled VAE]: split to {num_height_tiles}x{num_width_tiles} = {num_height_tiles * num_width_tiles} tiles. ' +
+            f'Optimal tile size {real_tile_width}x{real_tile_height}, original tile size {tile_size}x{tile_size}')
+
+        tile_input_bboxes, tile_output_bboxes = [], []
+        for i in range(num_height_tiles):
+            for j in range(num_width_tiles):
+                input_bbox = [
+                    pad + j*real_tile_width,
+                    min(pad + (j+1)*real_tile_width, w),
+                    pad + i*real_tile_height,
+                    min(pad + (i+1)*real_tile_height, h),
+                ]
+
+                output_bbox = [
+                    input_bbox[0] if input_bbox[0] > pad else 0,
+                    input_bbox[1] if input_bbox[1] < w - pad else w,
+                    input_bbox[2] if input_bbox[2] > pad else 0,
+                    input_bbox[3] if input_bbox[3] < h - pad else h,
+                ]
+
+                # scale to get the fianl output bbox
+                output_bbox *= scale
+                tile_input_bboxes.append(output_bbox)
+
+                tile_input_bboxes.append([
+                    max(0, input_bbox[0] - pad),
+                    min(w, input_bbox[1] + pad),
+                    max(0, input_bbox[2] - pad),
+                    min(h, input_bbox[3] + pad),
+                ])
+
+        return tile_input_bboxes, tile_output_bboxes
+
+def crop_valid_region(x, input_bbox, target_bbox, scale):
+    padded_bbox = [i * scale for i in input_bbox]
+    margin = [target_bbox[i] - padded_bbox[i] for i in range(4)]
+    return x[:, :, margin[2]:x.size(2)+margin[3], margin[0]:x.size(3)+margin[1]]
+
+
 class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder):
     @register_to_config
     def __init__(
@@ -245,3 +345,168 @@ class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder)
             return (decoded, feature_map_cur)
 
         return DecoderOutput(sample=decoded), feature_map_cur
+
+class TileHook():
+    """
+    Class for tiling algorithm test
+    """
+    def __init__(self, model, tile_size: int = 256, scale: int = 8, pad: int = 11):
+        self.model = model
+        self.tile_size = tile_size
+        self.scale = scale
+        self.pad = pad
+
+    def __call__(self, x):
+        return self._tiled_forward(x)
+
+    def _crop_valid_region(self, x, in_bbox, t_bbx, is_decoder=True, scale=8):
+        """
+        Handle cases where the height and width can not be divided by scale
+        """
+        padded_bbox = [i*scale if is_decoder else i//8 for i in in_bbox]
+        margin = [t_bbx[i] - padded_bbox[i] for i in range(4)]
+        return x[:, :, :, margin[1]:x.size(3)+margin[3], margin[0]:x.size(4)+margin[2]] # TODO verify
+
+    def _tiled_forward(self, x):
+        x = x.detach() # avoid back propagation
+        print(f"Tile input size : {x.shape}, tile size:{self.tile_size}, scale:{self.scale}, pad:{self.pad}")
+
+        batch_size = x.shape[0]
+        target_channels = self.model.out_channels
+        n_frames = x.shape[2]
+        h, w = x.shape[-2:]
+
+        in_tiles, out_tiles = self._split_tiles(h=h, w=w, scale=self.scale)
+        n_tiles = len(in_tiles)
+
+        result = torch.zeros((batch_size, target_channels, n_frames, h * self.scale , w * self.scale), device=x.get_device(), requires_grad=False)
+        for i in range(n_tiles):
+            in_bbox = in_tiles[i]
+            tile = x[:, :, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]]
+            tile = self.model(tile)
+            result[:, :, :, out_tiles[i][1]:out_tiles[i][3], out_tiles[i][0]:out_tiles[i][2]] = self._crop_valid_region(tile, in_bbox=in_tiles[i], t_bbx=out_tiles[i], scale=self.scale)
+            del tile
+
+        return result
+
+
+    def _get_best_tile_size(self, lowerbound, upperbound):
+        """
+        Get the best tile size for GPU memory
+        """
+        divider = 32
+        while divider >= 2:
+            remainer = lowerbound % divider
+            if remainer == 0:
+                return lowerbound
+            candidate = lowerbound - remainer + divider
+            if candidate <= upperbound:
+                return candidate
+            divider //= 2
+        return lowerbound
+
+    def _split_tiles(self, h, w, scale=8):
+        """
+        Split the feature map into tiles.
+        @param h, w: height and width of the feature map
+        @param scale: scaling factor for h and w.
+        @return: tile_in_bboxes, tile_out_bboxes
+        """
+        tile_size = self.tile_size
+        pad = self.pad
+        num_height_tiles = math.ceil((h - 2 * pad) / tile_size)
+        num_width_tiles = math.ceil((w - 2 * pad) / tile_size)
+        # If any of the numbers are 0, we let it be 1
+        # This is to deal with long and thin images
+        num_height_tiles = max(num_height_tiles, 1)
+        num_width_tiles = max(num_width_tiles, 1)
+
+        # Suggestions from https://github.com/Kahsolt: auto shrink the tile size
+        real_tile_height = math.ceil((h - 2 * pad) / num_height_tiles)
+        real_tile_width = math.ceil((w - 2 * pad) / num_width_tiles)
+        real_tile_height = self._get_best_tile_size(real_tile_height, tile_size)
+        real_tile_width = self._get_best_tile_size(real_tile_width, tile_size)
+
+        print(
+            f'[Tiled VAE]: split to {num_height_tiles}x{num_width_tiles} = {num_height_tiles * num_width_tiles} tiles. ' +
+            f'Optimal tile size {real_tile_width}x{real_tile_height}, original tile size {tile_size}x{tile_size}')
+
+        tile_input_bboxes, tile_output_bboxes = [], []
+        for i in range(num_height_tiles):
+            for j in range(num_width_tiles):
+                # bbox: [x0, y0, x1, y1]
+                input_bbox = [
+                    pad + j * real_tile_width,
+                    pad + i * real_tile_height,
+                    min(pad + (j + 1) * real_tile_width, w),
+                    min(pad + (i + 1) * real_tile_height, h),
+                ]
+
+                output_bbox = [
+                    input_bbox[0] if input_bbox[0] > pad else 0,
+                    input_bbox[1] if input_bbox[1] > pad else 0,
+                    input_bbox[2] if input_bbox[2] < w - pad else w,
+                    input_bbox[3] if input_bbox[3] < h - pad else h,
+                ]
+
+                # scale to get the fianl output bbox
+                output_bbox *= scale
+                tile_output_bboxes.append(output_bbox)
+
+                tile_input_bboxes.append([
+                    max(0, input_bbox[0] - pad),
+                    max(0, input_bbox[1] - pad),
+                    min(w, input_bbox[2] + pad),
+                    min(h, input_bbox[3] + pad),
+                ])
+
+        return tile_input_bboxes, tile_output_bboxes
+
+
+def test_tiled_decoder():
+    """
+    Test the tiled decoder.
+    """
+    from PIL import Image
+    test_3dconv_img_path = "/workspace/shared-dir/zzhu/tmp/20250728/ori.png"
+    tiled_3dconv_img_path = "/workspace/shared-dir/zzhu/tmp/20250728/tiled.png"
+
+    torch.manual_seed(10086)
+    x = torch.randn(1, 3, 8, 480, 720)
+
+
+    con3d = torch.nn.Conv3d(in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1)
+    tile_hook = TileHook(model=con3d, scale=1)
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # move to gpu
+    x = x.to(device)
+    con3d = con3d.to(device)
+
+    x_ori = con3d(x)
+    x_ori = x_ori.cpu().detach().numpy()
+    x_ori = np.clip(x_ori, 0, 1)
+    x_ori = x_ori*255.0
+    x_ori = x_ori.astype(np.uint8)
+    x_ori = x_ori[0, :, 0, :,:]
+    x_ori = x_ori.transpose(1, 2, 0)
+    x_ori_img = Image.fromarray(x_ori)
+    x_ori_img.save(test_3dconv_img_path)
+
+    x_processed = tile_hook(x)
+    x_processed = x_processed.cpu().detach().numpy()
+    x_processed = np.clip(x_processed, 0, 1)
+    x_processed = x_processed*255.0
+    x_processed = x_processed.astype(np.uint8)
+    x_processed = x_processed[0, :, 0, :,:]
+    x_processed = x_processed.transpose(1, 2, 0)
+    x_processed_img = Image.fromarray(x_processed)
+    x_processed_img.save(tiled_3dconv_img_path)
+
+
+def main():
+    test_tiled_decoder()
+
+
+if __name__ == '__main__':
+    main()
