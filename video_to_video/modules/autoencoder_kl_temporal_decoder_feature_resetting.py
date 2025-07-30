@@ -208,7 +208,7 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
             block_out_channels: Tuple[int] = (128, 256, 512, 512),
             layers_per_block: int = 2,
             tile_size: int = 256,
-            pad: int = 11,  ):
+            pad: int = 11):
         super(TiledTemporalDecoderFeatureResetting, self).__init__(in_channels=in_channels,
                                                                    out_channels=out_channels,
                                                                    block_out_channels=block_out_channels,
@@ -216,81 +216,153 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
         self.tile_size = tile_size
         self.pad = pad
 
-    def _get_best_tile_size(self, lowerbound, upperbound):
+    def forward(self,
+                sample: torch.Tensor,
+                feature_map_prev: Dict,
+                image_only_indicator: torch.Tensor,
+                frame_overlap_num: int = 1,
+                is_first_batch: bool = False,
+                num_frames: int = 1
+                ) -> torch.Tensor:
         """
-        Get the best tile size for GPU memory
+        To enable more No. of frames run in the decoder, utilize multiple GPUs:
+        1. Store the feature map reloading in GPU No.3
         """
-        divider = 32
-        while divider >= 2:
-            remainer = lowerbound % divider
-            if remainer == 0:
-                return lowerbound
-            candidate = lowerbound - remainer + divider
-            if candidate <= upperbound:
-                return candidate
-            divider //= 2
-        return lowerbound
+        fm_device = torch.device('cuda:3')
+        device_0 = torch.device('cuda:1')
+        device_1 = torch.device('cuda:2')
+        device_2 = torch.device('cuda:2')
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            if num_gpus < 4:
+                raise RuntimeError(f"The No. of GPUs needed is 4, now only has {num_gpus}")
 
-    def _split_tiles(self, h, w, scale=8):
-        """
-        Split the feature map into tiles.
-        @param h, w: height and width of the feature map
-        @param scale: scaling factor for h and w.
-        @return: tile_in_bboxes, tile_out_bboxes
-        """
-        tile_size = self.tile_size
-        pad = self.pad
-        num_height_tiles = math.ceil((h - 2 * pad) / tile_size)
-        num_width_tiles = math.ceil((w - 2 * pad) / tile_size)
-        # If any of the numbers are 0, we let it be 1
-        # This is to deal with long and thin images
-        num_height_tiles = max(num_height_tiles, 1)
-        num_width_tiles = max(num_width_tiles, 1)
+        # start from the 1st device
+        sample = sample.to(device_0)
 
-        # Suggestions from https://github.com/Kahsolt: auto shrink the tile size
-        real_tile_height = math.ceil((h - 2 * pad) / num_height_tiles)
-        real_tile_width = math.ceil((w - 2 * pad) / num_width_tiles)
-        real_tile_height = self._get_best_tile_size(real_tile_height, tile_size)
-        real_tile_width = self._get_best_tile_size(real_tile_width, tile_size)
+        feature_map_cur = {}
+        feature_map_cur["sample"] = sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)
 
-        print(
-            f'[Tiled VAE]: split to {num_height_tiles}x{num_width_tiles} = {num_height_tiles * num_width_tiles} tiles. ' +
-            f'Optimal tile size {real_tile_width}x{real_tile_height}, original tile size {tile_size}x{tile_size}')
+        if is_first_batch:
+            sample = self.conv_in.to(device_0)(sample)
+        else:
+            sample[:frame_overlap_num, :, :, :] = feature_map_prev["sample"].to(device_0)
+            sample = self.conv_in.to(device_0)(sample)
 
-        tile_input_bboxes, tile_output_bboxes = [], []
-        for i in range(num_height_tiles):
-            for j in range(num_width_tiles):
-                input_bbox = [
-                    pad + j*real_tile_width,
-                    min(pad + (j+1)*real_tile_width, w),
-                    pad + i*real_tile_height,
-                    min(pad + (i+1)*real_tile_height, h),
-                ]
+        feature_map_cur["conv_in"] = sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)
 
-                output_bbox = [
-                    input_bbox[0] if input_bbox[0] > pad else 0,
-                    input_bbox[1] if input_bbox[1] < w - pad else w,
-                    input_bbox[2] if input_bbox[2] > pad else 0,
-                    input_bbox[3] if input_bbox[3] < h - pad else h,
-                ]
+        upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
+        if self.training and self.gradient_checkpointing:
 
-                # scale to get the fianl output bbox
-                output_bbox *= scale
-                tile_input_bboxes.append(output_bbox)
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
 
-                tile_input_bboxes.append([
-                    max(0, input_bbox[0] - pad),
-                    min(w, input_bbox[1] + pad),
-                    max(0, input_bbox[2] - pad),
-                    min(h, input_bbox[3] + pad),
-                ])
+                return custom_forward
 
-        return tile_input_bboxes, tile_output_bboxes
+            if is_torch_version(">=", "1.11.0"):
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block),
+                    sample,
+                    image_only_indicator,
+                    use_reentrant=False,
+                )
+                sample = sample.to(upscale_dtype)
 
-def crop_valid_region(x, input_bbox, target_bbox, scale):
-    padded_bbox = [i * scale for i in input_bbox]
-    margin = [target_bbox[i] - padded_bbox[i] for i in range(4)]
-    return x[:, :, margin[2]:x.size(2)+margin[3], margin[0]:x.size(3)+margin[1]]
+                # up
+                for up_block in self.up_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(up_block),
+                        sample,
+                        image_only_indicator,
+                        use_reentrant=False,
+                    )
+            else:
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block),
+                    sample,
+                    image_only_indicator,
+                )
+                sample = sample.to(upscale_dtype)
+
+                # up
+                for up_block in self.up_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(up_block),
+                        sample,
+                        image_only_indicator,
+                    )
+        else:
+            # middle
+            if is_first_batch:
+                sample = self.mid_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            else:
+                sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_in"].to(device_0)
+                sample = self.mid_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            sample = sample.to(upscale_dtype)
+
+            feature_map_cur["mid_block"] = sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+
+            # up
+            for i, up_block in enumerate(self.up_blocks):
+                if i == 0:
+                    if is_first_batch:
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    else:
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"].to(device_0)
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
+                elif i == 1:
+                    if is_first_batch:
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    else:
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+                elif i == 2:
+                    if is_first_batch:
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    else:
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
+                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+                else: # i==3
+                    if is_first_batch:
+                        sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
+                    else:
+                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_1)
+                        sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
+                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+
+        # post-process
+        sample = self.conv_norm_out.to(device_2)(sample.to(device_2))
+        sample = self.conv_act.to(device_2)(sample.to(device_2))
+
+        feature_map_cur["conv_act"] = sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+        if is_first_batch:
+            sample = self.conv_out.to(device_2)(sample.to(device_2))
+        else:
+            sample[:frame_overlap_num, :, :, :] = feature_map_prev["conv_act"].to(fm_device)
+            sample = self.conv_out.to(device_2)(sample.to(device_2))
+
+        batch_frames, channels, height, width = sample.shape
+        batch_size = batch_frames // num_frames
+        sample = sample[None, :].reshape(batch_size, num_frames, channels, height, width).permute(0, 2, 1, 3, 4)
+
+        feature_map_cur["conv_out"] = sample[:, :, -frame_overlap_num:, :, :].clone().to(fm_device)
+        if is_first_batch:
+            sample = self.time_conv_out.to(device_2)(sample.to(device_2))
+        else:
+            sample[:, :, :frame_overlap_num, :, :] = feature_map_prev["conv_out"].to(device_2)
+            sample = self.time_conv_out.to(device_2)(sample.to(device_2))
+
+        sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)
+
+        torch.cuda.empty_cache()
+
+        return sample, feature_map_cur
 
 
 class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder):
@@ -316,10 +388,14 @@ class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder)
                                                                            sample_size=sample_size,
                                                                            scaling_factor=scaling_factor,
                                                                            force_upcast=force_upcast)
-        self.decoder = TemporalDecoderFeatureResetting(in_channels=latent_channels,
-                                                       out_channels=out_channels,
-                                                       block_out_channels=block_out_channels,
-                                                       layers_per_block=layers_per_block)
+        # self.decoder = TemporalDecoderFeatureResetting(in_channels=latent_channels,
+        #                                                out_channels=out_channels,
+        #                                                block_out_channels=block_out_channels,
+        #                                                layers_per_block=layers_per_block)
+        self.decoder = TiledTemporalDecoderFeatureResetting(in_channels=latent_channels,
+                                                            out_channels=out_channels,
+                                                            block_out_channels=block_out_channels,
+                                                            layers_per_block=layers_per_block)
 
     @apply_forward_hook
     def decode(
