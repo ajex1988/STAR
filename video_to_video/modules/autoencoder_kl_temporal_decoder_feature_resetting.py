@@ -306,35 +306,94 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
             feature_map_cur["mid_block"] = sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)
 
             # up
-            for i, up_block in enumerate(self.up_blocks):
-                if i == 0:
-                    if is_first_batch:
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            # Since up layers consumes most of the memory, we use tiling to support large input feature map.
+            up_scale = 8
+            tile_hook = TileHook(model=None,
+                                 tile_size=256,
+                                 scale=up_scale,
+                                 pad=11)
+            feat_h, feat_w = sample.shape[-2:]
+            in_bboxes, out_bboxes = tile_hook._split_tiles(h=feat_h, w=feat_w, scale=up_scale)
+            n_tiles = len(in_bboxes)
+
+            bs, nc, h, w = sample.shape
+            result = torch.zeros((bs, nc//4, h * self.scale, w * self.scale),
+                                 device=sample.get_device(), requires_grad=False)
+            for i in range(n_tiles):
+                in_bbox = in_bboxes[i]
+                tile = sample[:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]]
+                for j, up_block in enumerate(self.up_blocks):
+                    if j == 0:
+                        if is_first_batch:
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        else:
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"][:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_0)
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        if i == 0:
+                            feature_map_cur["up_block"] = [torch.zeros((frame_overlap_num, tile.shape[1], feat_h*2, feat_w*2),device=fm_device)]
+                        feature_map_cur["up_block"][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = [tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
+                    elif j == 1:
+                        if is_first_batch:
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        else:
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_0)
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        if i == 0:
+                            feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h*4, feat_w*4)))
+                        feature_map_cur["up_block"][-1][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+                    elif j == 2:
+                        if is_first_batch:
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        else:
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_0)
+                            tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
+                        if i == 0:
+                            feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h*8, feat_w*8)))
+                        feature_map_cur["up_block"][-1][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
                     else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"].to(device_0)
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
-                elif i == 1:
-                    if is_first_batch:
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-                    else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
-                elif i == 2:
-                    if is_first_batch:
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-                    else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
-                        sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
-                else: # i==3
-                    if is_first_batch:
-                        sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
-                    else:
-                        sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_1)
-                        sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
-                    feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+                        if is_first_batch:
+                            tile = up_block.to(device_1)(tile, image_only_indicator=image_only_indicator)
+                        else:
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :,
+                                                                in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_1)
+                            tile = up_block.to(device_1)(tile, image_only_indicator=image_only_indicator)
+                        if i == 0:
+                            feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h * 8, feat_w * 8)))
+                        feature_map_cur["up_block"][-1][:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+
+                result[:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile_hook._crop_valid_region(tile, in_bbox=in_bboxes[i],t_bbx=out_bboxes[i], scale=up_scale)
+                del tile
+            sample = result
+
+            # for i, up_block in enumerate(self.up_blocks):
+            #     if i == 0:
+            #         if is_first_batch:
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         else:
+            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"].to(device_0)
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
+            #     elif i == 1:
+            #         if is_first_batch:
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         else:
+            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+            #     elif i == 2:
+            #         if is_first_batch:
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         else:
+            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
+            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
+            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
+            #     else: # i==3
+            #         if is_first_batch:
+            #             sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
+            #         else:
+            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_1)
+            #             sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
+            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
 
         # post-process
         sample = self.conv_norm_out.to(device_2)(sample.to(device_2))
