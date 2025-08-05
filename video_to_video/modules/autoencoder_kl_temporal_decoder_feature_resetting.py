@@ -313,11 +313,13 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
                                  scale=up_scale,
                                  pad=11)
             feat_h, feat_w = sample.shape[-2:]
-            in_bboxes, out_bboxes = tile_hook._split_tiles(h=feat_h, w=feat_w, scale=up_scale)
+            in_bboxes, out_bboxes = tile_hook._split_tiles(h=feat_h, w=feat_w, scale=up_scale)  # 8x
+            in_bboxes_2x, out_bboxes_2x = tile_hook._split_tiles(h=feat_h, w=feat_w, scale=2)   # 2x
+            in_bboxes_4x, out_bboxes_4x = tile_hook._split_tiles(h=feat_h, w=feat_w, scale=4)   # 4x
             n_tiles = len(in_bboxes)
 
             bs, nc, h, w = sample.shape
-            result = torch.zeros((bs, nc//4, h * self.scale, w * self.scale),
+            result = torch.zeros((bs, nc//4, h * up_scale, w * up_scale),
                                  device=sample.get_device(), requires_grad=False)
             for i in range(n_tiles):
                 in_bbox = in_bboxes[i]
@@ -331,69 +333,52 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
                             tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
                         if i == 0:
                             feature_map_cur["up_block"] = [torch.zeros((frame_overlap_num, tile.shape[1], feat_h*2, feat_w*2),device=fm_device)]
-                        feature_map_cur["up_block"][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = [tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
+                        feature_map_cur["up_block"][0][:,:,out_bboxes_2x[i][1]:out_bboxes_2x[i][3], out_bboxes_2x[i][0]:out_bboxes_2x[i][2]] = tile_hook._crop_valid_region(tile=tile[-frame_overlap_num:, :, :, :].clone().to(fm_device),
+                                                                                                                                                                             in_bbox=in_bboxes_2x[i],
+                                                                                                                                                                             t_bbx=out_bboxes_2x[i],
+                                                                                                                                                                             scale=2)
                     elif j == 1:
                         if is_first_batch:
                             tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
                         else:
-                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_0)
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, 2*in_bboxes[i][1]:2*in_bboxes[i][3], 2*in_bboxes[i][0]:2*in_bboxes[i][2]].to(device_0)
                             tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
                         if i == 0:
                             feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h*4, feat_w*4)))
-                        feature_map_cur["up_block"][-1][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+                        feature_map_cur["up_block"][1][:,:,out_bboxes_4x[i][1]:out_bboxes_4x[i][3], out_bboxes_4x[i][0]:out_bboxes_4x[i][2]] = tile_hook._crop_valid_region(tile=tile[-frame_overlap_num:, :, :, :].clone().to(fm_device),
+                                                                                                                                                                             in_bbox=in_bboxes_4x[i],
+                                                                                                                                                                             t_bbx=out_bboxes_4x[i],
+                                                                                                                                                                             scale=4)
                     elif j == 2:
                         if is_first_batch:
                             tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
                         else:
-                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_0)
+                            tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :, 4*in_bboxes[i][1]:4*in_bboxes[i][3], 4*in_bboxes[i][0]:4*in_bboxes[i][2]].to(device_0)
                             tile = up_block.to(device_0)(tile, image_only_indicator=image_only_indicator)
                         if i == 0:
                             feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h*8, feat_w*8)))
-                        feature_map_cur["up_block"][-1][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+                        feature_map_cur["up_block"][2][:,:,out_bboxes[i][1]:out_bboxes[i][3], out_bboxes[i][0]:out_bboxes[i][2]] = tile_hook._crop_valid_region(tile=tile[-frame_overlap_num:, :, :, :].clone().to(fm_device),
+                                                                                                                                                                 in_bbox=in_bbox,
+                                                                                                                                                                 t_bbx=out_bboxes[i],
+                                                                                                                                                                 scale=8)
                     else:
+                        tile = tile.to(device_1)
                         if is_first_batch:
                             tile = up_block.to(device_1)(tile, image_only_indicator=image_only_indicator)
                         else:
                             tile[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][j - 1][:, :,
-                                                                in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].to(device_1)
+                                                                8*in_bbox[1]:8*in_bbox[3], 8*in_bbox[0]:8*in_bbox[2]].to(device_1)
                             tile = up_block.to(device_1)(tile, image_only_indicator=image_only_indicator)
                         if i == 0:
                             feature_map_cur["up_block"].append(torch.zeros((frame_overlap_num, tile.shape[1], feat_h * 8, feat_w * 8)))
-                        feature_map_cur["up_block"][-1][:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile[-frame_overlap_num:, :, :, :].clone().to(fm_device)
+                        feature_map_cur["up_block"][3][:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile_hook._crop_valid_region(tile=tile[-frame_overlap_num:, :, :, :].clone().to(fm_device),
+                                                                                                                                                                  in_bbox=in_bbox,
+                                                                                                                                                                  t_bbx=out_bboxes[i],
+                                                                                                                                                                  scale=8)
 
-                result[:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile_hook._crop_valid_region(tile, in_bbox=in_bboxes[i],t_bbx=out_bboxes[i], scale=up_scale)
+                result[:, :, out_bboxes[i][1]:out_bboxes[i][3],out_bboxes[i][0]:out_bboxes[i][2]] = tile_hook._crop_valid_region(tile=tile, in_bbox=in_bboxes[i],t_bbx=out_bboxes[i], scale=up_scale)
                 del tile
             sample = result
-
-            # for i, up_block in enumerate(self.up_blocks):
-            #     if i == 0:
-            #         if is_first_batch:
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         else:
-            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["mid_block"].to(device_0)
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         feature_map_cur["up_block"] = [sample[-frame_overlap_num:, :, :, :].clone().to(fm_device)]
-            #     elif i == 1:
-            #         if is_first_batch:
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         else:
-            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
-            #     elif i == 2:
-            #         if is_first_batch:
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         else:
-            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_0)
-            #             sample = up_block.to(device_0)(sample, image_only_indicator=image_only_indicator)
-            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
-            #     else: # i==3
-            #         if is_first_batch:
-            #             sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
-            #         else:
-            #             sample[:frame_overlap_num, :, :, :] = feature_map_prev["up_block"][i - 1].to(device_1)
-            #             sample = up_block.to(device_1)(sample.to(device_1), image_only_indicator=image_only_indicator)
-            #         feature_map_cur["up_block"].append(sample[-frame_overlap_num:, :, :, :].clone().to(fm_device))
 
         # post-process
         sample = self.conv_norm_out.to(device_2)(sample.to(device_2))
@@ -494,13 +479,13 @@ class TileHook():
     def __call__(self, x):
         return self._tiled_forward(x)
 
-    def _crop_valid_region(self, x, in_bbox, t_bbx, is_decoder=True, scale=8):
+    def _crop_valid_region(self, tile, in_bbox, t_bbx, is_decoder=True, scale=8):
         """
         Handle cases where the height and width can not be divided by scale
         """
         padded_bbox = [i*scale if is_decoder else i//8 for i in in_bbox]
         margin = [t_bbx[i] - padded_bbox[i] for i in range(4)]
-        return x[:, :, :, margin[1]:x.size(3)+margin[3], margin[0]:x.size(4)+margin[2]] # TODO verify
+        return tile[:, :, margin[1]:tile.size(2)+margin[3], margin[0]:tile.size(3)+margin[2]] # TODO verify
 
     def _tiled_forward(self, x):
         x = x.detach() # avoid back propagation
@@ -585,7 +570,7 @@ class TileHook():
                 ]
 
                 # scale to get the fianl output bbox
-                output_bbox *= scale
+                output_bbox = [i*scale for i in output_bbox]
                 tile_output_bboxes.append(output_bbox)
 
                 tile_input_bboxes.append([
