@@ -180,7 +180,7 @@ class Vid2VidFr(VideoToVideo_sr):
 
         torch.cuda.empty_cache()
 
-    def vae_decode_fr(self, z, z_prev, feature_map_prev, is_first_batch, out_win_step, out_win_overlap):
+    def vae_decode_fr(self, z, z_prev, feature_map_prev, is_first_batch, out_win_step, out_win_overlap, decoder_tile_size=64):
         z = rearrange(z, "b c f h w -> (b f) c h w")
         num_f = z.shape[0]
         num_steps = int(ceil(num_f/out_win_step))
@@ -198,7 +198,8 @@ class Vid2VidFr(VideoToVideo_sr):
                                                  feature_map_prev=feature_map_prev,
                                                  num_frames=z_chunk.shape[0],
                                                  is_first_batch=is_first_batch,
-                                                 frame_overlap_num=out_win_overlap)
+                                                 frame_overlap_num=out_win_overlap,
+                                                 decoder_tile_size=decoder_tile_size)
             v = v.sample
             video.append(v[out_win_overlap:,:,:,:]) # handle corner case.
             z_prev = z_chunk[-out_win_overlap:,:,:,:] #always ensure out_win_overlap win size
@@ -219,7 +220,8 @@ class Vid2VidFr(VideoToVideo_sr):
               steps=50,
               solver_mode='fast',
               guide_scale=7.5,
-              max_chunk_len=32):
+              max_chunk_len=32,
+              decoder_tile_size=64):
         video_data = input['video_data']
         y = input['y']
         (target_h, target_w) = input['target_res']
@@ -275,7 +277,8 @@ class Vid2VidFr(VideoToVideo_sr):
                                                                           feature_map_prev=feature_map_prev,
                                                                           is_first_batch=is_first_batch,
                                                                           out_win_step=out_win_step,
-                                                                          out_win_overlap=out_win_overlap)
+                                                                          out_win_overlap=out_win_overlap,
+                                                                          decoder_tile_size=decoder_tile_size)
 
             logger.info(f'temporal vae decoding with feature resetting, finished.')
 

@@ -222,7 +222,8 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
                 image_only_indicator: torch.Tensor,
                 frame_overlap_num: int = 1,
                 is_first_batch: bool = False,
-                num_frames: int = 1
+                num_frames: int = 1,
+                tile_size: int = 64,
                 ) -> torch.Tensor:
         """
         To enable more No. of frames run in the decoder, utilize multiple GPUs:
@@ -309,7 +310,7 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
             # Since up layers consumes most of the memory, we use tiling to support large input feature map.
             up_scale = 8
             tile_hook = TileHook(model=None,
-                                 tile_size=256,
+                                 tile_size=tile_size,
                                  scale=up_scale,
                                  pad=11)
             feat_h, feat_w = sample.shape[-2:]
@@ -450,6 +451,7 @@ class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder)
         frame_overlap_num: int,
         is_first_batch: bool = False,
         return_dict: bool = True,
+        decoder_tile_size=64
     ) -> Union[DecoderOutput, torch.Tensor]:
         batch_size = z.shape[0] // num_frames
         image_only_indicator = torch.zeros(batch_size, num_frames, dtype=z.dtype, device=z.device)
@@ -459,7 +461,8 @@ class AutoencoderKLTemporalDecoderFeatureResetting(AutoencoderKLTemporalDecoder)
                                                 image_only_indicator=image_only_indicator,
                                                 frame_overlap_num=frame_overlap_num,
                                                 is_first_batch=is_first_batch,
-                                                num_frames=num_frames)
+                                                num_frames=num_frames,
+                                                tile_size=decoder_tile_size)
 
         if not return_dict:
             return (decoded, feature_map_cur)

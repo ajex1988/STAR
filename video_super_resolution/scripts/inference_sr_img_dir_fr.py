@@ -214,7 +214,8 @@ class StarFR(STAR):
                            prompt,
                            max_chunk_len,
                            color_cor_method,
-                           device=torch.device(f'cuda:0')):
+                           device=torch.device(f'cuda:0'),
+                           decoder_tile_size=64):
         """
         Enhance a video volume conditioned on previous volume's output feature maps.
         This trick aims at aligning the sr videos based on previous processed frames.
@@ -247,7 +248,8 @@ class StarFR(STAR):
                                                         steps=self.steps,
                                                         solver_mode=self.solver_mode,
                                                         guide_scale=self.guide_scale,
-                                                        max_chunk_len=max_chunk_len
+                                                        max_chunk_len=max_chunk_len,
+                                                        decoder_tile_size=decoder_tile_size
                                                         )
 
         output = tensor2vid(output)
@@ -289,6 +291,8 @@ def parse_args():
 
     parser.add_argument("--device", type=str, default='cuda:0') # Add support for CPU because RAM sufficient
 
+    parser.add_argument("--decoder_tile_size", type=int, default=64, help="decoder tile size")
+
     return parser.parse_args()
 
 
@@ -314,6 +318,8 @@ def main():
 
     max_chunk_len = args.max_chunk_len
     device = torch.device(args.device)
+
+    decoder_tile_size = args.decoder_tile_size
 
     assert solver_mode in ('fast', 'normal')
     assert in_win_size >= in_win_step
