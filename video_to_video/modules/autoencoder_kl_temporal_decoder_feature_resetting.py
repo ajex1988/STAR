@@ -2,6 +2,7 @@ import torch
 import math
 from typing import Dict, Optional, Tuple, Union
 import numpy as np
+import torch.nn.functional as F
 
 from diffusers import AutoencoderKLTemporalDecoder
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
@@ -405,7 +406,7 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
 
         sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
         return sample, feature_map_cur
 
@@ -585,6 +586,98 @@ class TileHook():
 
         return tile_input_bboxes, tile_output_bboxes
 
+
+class GroupNormParam:
+
+    def __init__(self):
+        self.var_list = []
+        self.mean_list = []
+        self.pixel_list = []
+        self.weight = None
+        self.bias = None
+
+    def add_tile(self, tile, layer):
+        var, mean = self._get_var_mean(tile, 32)
+        # For giant images, the variance can be larger than max float16
+        # In this case we create a copy to float32
+        if var.dtype == torch.float16 and var.isinf().any():
+            fp32_tile = tile.float()
+            var, mean = self._get_var_mean(fp32_tile, 32)
+        # ============= DEBUG: test for infinite =============
+        # if torch.isinf(var).any():
+        #    print('var: ', var)
+        # ====================================================
+        self.var_list.append(var)
+        self.mean_list.append(mean)
+        self.pixel_list.append(
+            tile.shape[2]*tile.shape[3])
+        if hasattr(layer, 'weight'):
+            self.weight = layer.weight
+            self.bias = layer.bias
+        else:
+            self.weight = None
+            self.bias = None
+
+    def _get_var_mean(input, num_groups, eps=1e-6):
+        """
+        Get mean and var for group norm
+        """
+        b, c = input.size(0), input.size(1)
+        channel_in_group = int(c / num_groups)
+        input_reshaped = input.contiguous().view(1, int(b * num_groups), channel_in_group, *input.size()[2:])
+        var, mean = torch.var_mean(input_reshaped, dim=[0, 2, 3, 4], unbiased=False)
+        return var, mean
+
+    def _custom_group_norm(input, num_groups, mean, var, weight=None, bias=None, eps=1e-6):
+        """
+        Custom group norm with fixed mean and var
+
+        @param input: input tensor
+        @param num_groups: number of groups. by default, num_groups = 32
+        @param mean: mean, must be pre-calculated by get_var_mean
+        @param var: var, must be pre-calculated by get_var_mean
+        @param weight: weight, should be fetched from the original group norm
+        @param bias: bias, should be fetched from the original group norm
+        @param eps: epsilon, by default, eps = 1e-6 to match the original group norm
+
+        @return: normalized tensor
+        """
+        b, c = input.size(0), input.size(1)
+        channel_in_group = int(c / num_groups)
+        input_reshaped = input.contiguous().view(
+            1, int(b * num_groups), channel_in_group, *input.size()[2:])
+
+        out = F.batch_norm(input_reshaped, mean.to(input), var.to(input), weight=None, bias=None, training=False,
+                           momentum=0, eps=eps)
+        out = out.view(b, c, *input.size()[2:])
+
+        # post affine transform
+        if weight is not None:
+            out *= weight.view(1, -1, 1, 1)
+        if bias is not None:
+            out += bias.view(1, -1, 1, 1)
+        return out
+
+    def summary(self):
+        """
+        summarize the mean and var and return a function
+        that apply group norm on each tile
+        """
+        if len(self.var_list) == 0: return None
+
+        var = torch.vstack(self.var_list)
+        mean = torch.vstack(self.mean_list)
+        max_value = max(self.pixel_list)
+        pixels = torch.tensor(self.pixel_list, dtype=torch.float32, device=var.device) / max_value
+        sum_pixels = torch.sum(pixels)
+        pixels = pixels.unsqueeze(1) / sum_pixels
+        var = torch.sum(var * pixels, dim=0)
+        mean = torch.sum(mean * pixels, dim=0)
+        return lambda x:  self._custom_group_norm(x, 32, mean, var, self.weight, self.bias)
+
+
+class VAEDecoderHook():
+    pass
 
 def test_tiled_decoder():
     """

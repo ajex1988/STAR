@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 import torch.nn as nn
 import math
+from video_to_video.modules.task_queue import build_up_blocks_task_queue
 
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
 
@@ -182,10 +183,11 @@ class UpModuleTile(nn.Module):
         self.pad = pad
 
     def forward(self, x, path_prefix):
+        image_only_indicator = torch.zeros(1, x.shape[0], dtype=x.dtype, device=x.device)
         tile_hook = TileHook(model=None,tile_size=self.tile_size,scale=self.upscale,pad=self.pad)
-        feat_h, feat_w = x.shape[-2:]
+        nf, nc, feat_h, feat_w = x.shape
         in_bboxes, out_bboxes = tile_hook._split_tiles(h=feat_h, w=feat_w,scale=8)
-        result = torch.zeros(in_bboxes.shape, device=x.device)
+        result = torch.zeros((nf, nc, feat_h*self.upscale, feat_w*self.upscale), device=x.device)
         n_tiles = len(in_bboxes)
 
         for i in range(n_tiles):
@@ -195,9 +197,9 @@ class UpModuleTile(nn.Module):
             for j, block in enumerate(self.up_blocks):
                 feat_map_path = path_prefix + f"_tile_{i}_layer_{j}.png"
                 save_feature_map(tile, feat_map_path)
-                tile = block(tile)
+                tile = block(tile, image_only_indicator=image_only_indicator)
             result[out_bbx[1]:out_bbx[3],out_bbx[0]:out_bbx[2]] = tile_hook._crop_valid_region(tile=tile,
-                                                                                               in_bboxes=in_bbx,
+                                                                                               in_bbox=in_bbx,
                                                                                                t_bbx=out_bbx,
                                                                                                scale=self.upscale)
             feat_map_path = path_prefix + f"_tile_{i}_out.png"
@@ -212,6 +214,25 @@ def test_tiling():
     Tiling without recurrent mechanism
     """
     args = parse_args()
+    out_dir = args.out_dir
+    height = args.height
+    width = args.width
+    num_frames = args.num_frames
+    num_channels = args.num_channels
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    temporal_decoder = TemporalDecoder()
+    up_blocks = temporal_decoder.up_blocks
+    up_blocks = up_blocks.to(device=device)
+
+    input_tensor = get_input_feature_map(h=height, w=width, n_frames=num_frames, nc=num_channels, device=device)
+    print(f"Input shape: {input_tensor.shape}")
+    up_module = UpModuleTile(up_blocks)
+
+    output_tensor = up_module(input_tensor, out_dir)
+
+    print(f"Output shape: {output_tensor.shape}")
 
 
 def test_no_tiling():
@@ -225,7 +246,6 @@ def test_no_tiling():
     width = args.width
     num_frames = args.num_frames
     num_channels = args.num_channels
-    os.makedirs(out_dir, exist_ok=True)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -241,6 +261,28 @@ def test_no_tiling():
 
     print(f"Output shape: {output_tensor.shape}")
 
+
+def test_task_queue_tiling():
+    print("Testing task queue tiling and no recurrent mechanism")
+    args = parse_args()
+    out_dir = args.out_dir
+    height = args.height
+    width = args.width
+    num_frames = args.num_frames
+    num_channels = args.num_channels
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    input_tensor = get_input_feature_map(h=height, w=width, n_frames=num_frames, nc=num_channels, device=device)
+    print(f"Input shape: {input_tensor.shape}")
+
+    temporal_decoder = TemporalDecoder()
+
+    task_queue = []
+    build_up_blocks_task_queue(queue=task_queue,
+                                            block=temporal_decoder.up_blocks)
+    print(task_queue)
+
+
 def test_tiling_with_recur():
     args = parse_args()
 
@@ -249,7 +291,9 @@ def test_no_tiling_recur():
 
 
 def main():
-    test_no_tiling()
+    # test_no_tiling()
+    # test_tiling()
+    test_task_queue_tiling()
 
 
 if __name__ == "__main__":
