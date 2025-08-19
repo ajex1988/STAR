@@ -209,6 +209,23 @@ class UpModuleTile(nn.Module):
         return x
 
 
+class UpModuleTileTaskQueue(nn.Module):
+    def __init__(self, up_blocks, tile_size=64, upscale=8, pad=11):
+        super(UpModuleTileTaskQueue, self).__init__()
+        self.up_blocks = up_blocks
+        self.tile_size = tile_size
+        self.upscale = upscale
+        self.pad = pad
+
+    def forward(self, x, path_prefix):
+        x = self.forward_task_queue(x)
+        feat_map_path = path_prefix + "_tile_task_queue.png"
+        save_feature_map(x, feat_map_path)
+
+
+    def forward_task_queue(self, x):
+        pass
+
 def test_tiling():
     """
     Tiling without recurrent mechanism

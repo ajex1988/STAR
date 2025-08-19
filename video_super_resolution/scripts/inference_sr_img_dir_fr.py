@@ -160,7 +160,7 @@ class StarFR(STAR):
 
 
     def enhance_dir_recur(self, input_frames_dir, prompt, in_win_size, in_win_step, out_win_step, out_win_overlap,
-                          max_chunk_len=32, color_cor_method="wavelet", device=torch.device(f'cuda:0')):
+                          max_chunk_len=32, color_cor_method="wavelet", device=torch.device(f'cuda:0'), decoder_tile_size=64):
         """
         Enhance the images inside a directory, using an approach in a 'recursive' way.
         For the first and last window, use the 'same' padding strategy.
@@ -197,7 +197,8 @@ class StarFR(STAR):
                                                                          prompt=prompt,
                                                                          max_chunk_len=max_chunk_len,
                                                                          color_cor_method=color_cor_method,
-                                                                         device=device)
+                                                                         device=device,
+                                                                         decoder_tile_size=decoder_tile_size)
 
             image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
             for i in range(len(w_img_name_list)):
@@ -341,7 +342,8 @@ def main():
                              out_win_overlap=out_win_overlap,
                              max_chunk_len=max_chunk_len,
                              color_cor_method=color_cor_method,
-                             device=device)
+                             device=device,
+                             decoder_tile_size=decoder_tile_size)
 
 
 if __name__ == '__main__':
