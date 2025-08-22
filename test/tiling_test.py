@@ -5,125 +5,12 @@ import numpy as np
 from PIL import Image
 import torch.nn as nn
 import math
+import copy
 from video_to_video.modules.task_queue import build_up_blocks_task_queue
+from video_to_video.modules.autoencoder_kl_temporal_decoder_feature_resetting import TileHook, GroupNormParam
 
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
 
-class TileHook():
-    """
-    Class for tiling algorithm test
-    """
-    def __init__(self, model, tile_size: int = 256, scale: int = 8, pad: int = 11):
-        self.model = model
-        self.tile_size = tile_size
-        self.scale = scale
-        self.pad = pad
-
-    def __call__(self, x):
-        return self._tiled_forward(x)
-
-    def _crop_valid_region(self, tile, in_bbox, t_bbx, is_decoder=True, scale=8):
-        """
-        Handle cases where the height and width can not be divided by scale
-        """
-        padded_bbox = [i*scale if is_decoder else i//8 for i in in_bbox]
-        margin = [t_bbx[i] - padded_bbox[i] for i in range(4)]
-        return tile[:, :, margin[1]:tile.size(2)+margin[3], margin[0]:tile.size(3)+margin[2]] # TODO verify
-
-    def _tiled_forward(self, x):
-        x = x.detach() # avoid back propagation
-        print(f"Tile input size : {x.shape}, tile size:{self.tile_size}, scale:{self.scale}, pad:{self.pad}")
-
-        batch_size = x.shape[0]
-        target_channels = self.model.out_channels
-        n_frames = x.shape[2]
-        h, w = x.shape[-2:]
-
-        in_tiles, out_tiles = self._split_tiles(h=h, w=w, scale=self.scale)
-        n_tiles = len(in_tiles)
-
-        result = torch.zeros((batch_size, target_channels, n_frames, h * self.scale , w * self.scale), device=x.get_device(), requires_grad=False)
-        for i in range(n_tiles):
-            in_bbox = in_tiles[i]
-            tile = x[:, :, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]]
-            tile = self.model(tile)
-            result[:, :, :, out_tiles[i][1]:out_tiles[i][3], out_tiles[i][0]:out_tiles[i][2]] = self._crop_valid_region(tile, in_bbox=in_tiles[i], t_bbx=out_tiles[i], scale=self.scale)
-            del tile
-
-        return result
-
-
-    def _get_best_tile_size(self, lowerbound, upperbound):
-        """
-        Get the best tile size for GPU memory
-        """
-        divider = 32
-        while divider >= 2:
-            remainer = lowerbound % divider
-            if remainer == 0:
-                return lowerbound
-            candidate = lowerbound - remainer + divider
-            if candidate <= upperbound:
-                return candidate
-            divider //= 2
-        return lowerbound
-
-    def _split_tiles(self, h, w, scale=8):
-        """
-        Split the feature map into tiles.
-        @param h, w: height and width of the feature map
-        @param scale: scaling factor for h and w.
-        @return: tile_in_bboxes, tile_out_bboxes
-        """
-        tile_size = self.tile_size
-        pad = self.pad
-        num_height_tiles = math.ceil((h - 2 * pad) / tile_size)
-        num_width_tiles = math.ceil((w - 2 * pad) / tile_size)
-        # If any of the numbers are 0, we let it be 1
-        # This is to deal with long and thin images
-        num_height_tiles = max(num_height_tiles, 1)
-        num_width_tiles = max(num_width_tiles, 1)
-
-        # Suggestions from https://github.com/Kahsolt: auto shrink the tile size
-        real_tile_height = math.ceil((h - 2 * pad) / num_height_tiles)
-        real_tile_width = math.ceil((w - 2 * pad) / num_width_tiles)
-        real_tile_height = self._get_best_tile_size(real_tile_height, tile_size)
-        real_tile_width = self._get_best_tile_size(real_tile_width, tile_size)
-
-        print(
-            f'[Tiled VAE]: split to {num_height_tiles}x{num_width_tiles} = {num_height_tiles * num_width_tiles} tiles. ' +
-            f'Optimal tile size {real_tile_width}x{real_tile_height}, original tile size {tile_size}x{tile_size}')
-
-        tile_input_bboxes, tile_output_bboxes = [], []
-        for i in range(num_height_tiles):
-            for j in range(num_width_tiles):
-                # bbox: [x0, y0, x1, y1]
-                input_bbox = [
-                    pad + j * real_tile_width,
-                    pad + i * real_tile_height,
-                    min(pad + (j + 1) * real_tile_width, w),
-                    min(pad + (i + 1) * real_tile_height, h),
-                ]
-
-                output_bbox = [
-                    input_bbox[0] if input_bbox[0] > pad else 0,
-                    input_bbox[1] if input_bbox[1] > pad else 0,
-                    input_bbox[2] if input_bbox[2] < w - pad else w,
-                    input_bbox[3] if input_bbox[3] < h - pad else h,
-                ]
-
-                # scale to get the fianl output bbox
-                output_bbox = [i*scale for i in output_bbox]
-                tile_output_bboxes.append(output_bbox)
-
-                tile_input_bboxes.append([
-                    max(0, input_bbox[0] - pad),
-                    max(0, input_bbox[1] - pad),
-                    min(w, input_bbox[2] + pad),
-                    min(h, input_bbox[3] + pad),
-                ])
-
-        return tile_input_bboxes, tile_output_bboxes
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -141,10 +28,10 @@ def parse_args():
     return args
 
 
-def get_input_feature_map(seed:int=10086, h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0") ):
+def get_input_feature_map(seed:int=10086, h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0"), requires_grad=False ):
     torch.manual_seed(seed)
     input_shape = (n_frames,nc,h,w)
-    input_tensor = torch.rand(input_shape)
+    input_tensor = torch.rand(input_shape,requires_grad=requires_grad)
     input_tensor = input_tensor.to(device)
     return input_tensor
 
@@ -224,7 +111,64 @@ class UpModuleTileTaskQueue(nn.Module):
 
 
     def forward_task_queue(self, x):
-        pass
+        tile_helper = TileHook(model=None,tile_size=self.tile_size,scale=self.upscale,pad=self.pad)
+
+        nf, nc, feat_h, feat_w = x.shape
+        in_bboxes, out_bboxes = tile_helper._split_tiles(h=feat_h, w=feat_w,scale=8)
+        result = torch.zeros((nf, nc, feat_h * self.upscale, feat_w * self.upscale), device=x.device)
+        n_tiles = len(in_bboxes)
+        tile_completed = 0
+
+        task_queue = build_up_blocks_task_queue(block=self.up_blocks)
+        task_queues = [copy.deepcopy(task_queue) for _ in range(n_tiles)]
+
+        while True:
+            group_norm_helper = GroupNormParam()
+            for i in range(n_tiles):
+                in_bbx = in_bboxes[i]
+                out_bbx = out_bboxes[i]
+                tile = x[:, :, in_bbx[1]:in_bbx[3], in_bbx[0]:in_bbx[2]]
+
+                task_queue = task_queues[i]
+
+
+                while len(task_queue) > 0:
+                    task = task_queue.pop(0)
+
+                    if task[0] == "pre_norm":
+                        group_norm_helper.add_tile(tile=tile, layer=task[1])
+                        break
+                    elif task[0] == "store_res":
+                        task_id = 0
+                        res = task[1](tile)
+                        while task_queue[task_id][0] != "add_res":
+                            task_id += 1
+                        task_queue[task_id][1] = res
+                    elif task[0] == "add_res":
+                        tile += task[1]
+                    else:
+                        tile = task[1](tile)
+
+                if len(task_queue) == 0:
+                    # finished current tile
+                    tile_completed += 1
+                    result[out_bbx[1]:out_bbx[3], out_bbx[0]:out_bbx[2]] = tile_helper._crop_valid_region(tile=tile,
+                                                                                                          in_bbox=in_bbx,
+                                                                                                          t_bbx=out_bbx,
+                                                                                                          scale=self.upscale)
+                    del tile
+
+            if tile_completed == n_tiles:
+                break
+
+            # insert the group norm task to the head of each task queue
+            group_norm_func = group_norm_helper.summary()
+            if group_norm_func is not None:
+                for i in range(n_tiles):
+                    task_queues[i].insert(0, ("apply_norm", group_norm_func))
+
+        return result
+
 
 def test_tiling():
     """
@@ -288,16 +232,17 @@ def test_task_queue_tiling():
     num_frames = args.num_frames
     num_channels = args.num_channels
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    input_tensor = get_input_feature_map(h=height, w=width, n_frames=num_frames, nc=num_channels, device=device)
-    print(f"Input shape: {input_tensor.shape}")
+    with torch.no_grad():
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        input_tensor = get_input_feature_map(h=height, w=width, n_frames=num_frames, nc=num_channels, device=device)
+        print(f"Input shape: {input_tensor.shape}")
 
-    temporal_decoder = TemporalDecoder()
+        temporal_decoder = TemporalDecoder().to(device=device)
 
-    task_queue = []
-    build_up_blocks_task_queue(queue=task_queue,
-                                            block=temporal_decoder.up_blocks)
-    print(task_queue)
+        up_module = UpModuleTileTaskQueue(up_blocks=temporal_decoder.up_blocks)
+        output_tensor = up_module(input_tensor, out_dir)
+        print(f"Output shape: {output_tensor.shape}")
+
 
 
 def test_tiling_with_recur():

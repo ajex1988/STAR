@@ -192,7 +192,7 @@ class TemporalDecoderFeatureResetting(TemporalDecoder):
 
         sample = sample.permute(0, 2, 1, 3, 4).reshape(batch_frames, channels, height, width)
 
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
         return sample, feature_map_cur
 
@@ -233,7 +233,7 @@ class TiledTemporalDecoderFeatureResetting(TemporalDecoder):
         fm_device = torch.device('cuda:3')
         device_0 = torch.device('cuda:1')
         device_1 = torch.device('cuda:2')
-        device_2 = torch.device('cuda:2')
+        device_2 = torch.device('cpu')
         if torch.cuda.is_available():
             num_gpus = torch.cuda.device_count()
             if num_gpus < 4:
@@ -618,7 +618,7 @@ class GroupNormParam:
             self.weight = None
             self.bias = None
 
-    def _get_var_mean(input, num_groups, eps=1e-6):
+    def _get_var_mean(self, input, num_groups, eps=1e-6):
         """
         Get mean and var for group norm
         """
@@ -628,7 +628,7 @@ class GroupNormParam:
         var, mean = torch.var_mean(input_reshaped, dim=[0, 2, 3, 4], unbiased=False)
         return var, mean
 
-    def _custom_group_norm(input, num_groups, mean, var, weight=None, bias=None, eps=1e-6):
+    def _custom_group_norm(self, input, num_groups, mean, var, weight=None, bias=None, eps=1e-6):
         """
         Custom group norm with fixed mean and var
 
@@ -653,8 +653,10 @@ class GroupNormParam:
 
         # post affine transform
         if weight is not None:
+            weight.requires_grad = False
             out *= weight.view(1, -1, 1, 1)
         if bias is not None:
+            bias.requires_grad = False
             out += bias.view(1, -1, 1, 1)
         return out
 

@@ -38,10 +38,11 @@ def vec5d_to_4d(hidden_states):
     return hidden_states
 
 
-def build_up_blocks_task_queue(queue, block):
+def build_up_blocks_task_queue(block):
     """
     Build the up-block task queue.
     """
+    queue = []
     for i in range(4):
         for j in range(3):
             build_res_block_task_queue(queue, block[i].resnets[j].spatial_res_block)
@@ -54,7 +55,7 @@ def build_up_blocks_task_queue(queue, block):
             # Up-sample the latent
             queue.append(('upsample_2d',block[i].upsamplers[0]))
 
-
+    return queue
 
 def build_decoder_task_queue():
     pass
