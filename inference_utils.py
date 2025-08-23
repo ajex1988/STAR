@@ -121,6 +121,13 @@ def save_frames(frame_dir, frame_name_list, frame_list):
         frame_path = os.path.join(frame_dir, frame_name)
         cv2.imwrite(frame_path, frame)
 
+def load_latents(latents_dir, latents_name_list):
+    latent_list = []
+    for latents_name in latents_name_list:
+        latents_path = os.path.join(latents_dir, latents_name)
+        latent = np.load(latents_path)
+        latent_list.append(latent)
+    return latent_list
 
 def collate_fn(data, device):
     """Prepare the input just before the forward function.
