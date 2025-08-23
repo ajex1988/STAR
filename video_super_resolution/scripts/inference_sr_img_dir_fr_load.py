@@ -93,7 +93,8 @@ def enhance_a_video_fr(vae,
     video_data = preprocess(input_frames)
     bs = 1
     frames_num, _, h, w = video_data.shape
-    padding = pad_to_fit(h, w)
+    target_h, target_w = int(h * 4), int(w * 4)  # adjust_resolution(h, w, up_scale=4)
+    padding = pad_to_fit(target_h, target_w)
     with torch.no_grad():
         with amp.autocast(enabled=True):
             input_latents = np.stack(input_latents)
@@ -109,7 +110,7 @@ def enhance_a_video_fr(vae,
                                                                      out_win_overlap=out_win_overlap,
                                                                      decoder_tile_size=decoder_tile_size)
         w1, w2, h1, h2 = padding
-        vid_tensor_gen = vid_tensor_gen[:, :, h1:h + h1, w1:w + w1]
+        vid_tensor_gen = vid_tensor_gen[:, :, h1:target_h + h1, w1:target_w + w1]
 
         gen_video = rearrange(
             vid_tensor_gen, '(b f) c h w -> b c f h w', b=bs)
@@ -120,7 +121,7 @@ def enhance_a_video_fr(vae,
 
     output = tensor2vid(output)
 
-    target_h, target_w = int(h * 4), int(w * 4)  # adjust_resolution(h, w, up_scale=4)
+
     # Using color fix
     if color_cor_method == "adain":
         output = adain_color_fix(output, video_data)
@@ -143,6 +144,7 @@ def main():
     latent_path = args.latent_path
     prompt = args.prompt
     save_dir = args.save_dir
+    os.makedirs(save_dir, exist_ok=True)
 
     in_win_size = args.in_win_size
     in_win_step = args.in_win_step
@@ -188,7 +190,13 @@ def main():
         w_start_idx = w_i * in_win_size if w_i != n_steps - 1 else n_frames - in_win_size
         w_end_idx = w_start_idx + in_win_size if w_i != n_steps - 1 else n_frames
         w_latent_name_list = latents_name_list[w_start_idx:w_end_idx]
-        w_img_name_list = img_name_list[w_start_idx:w_end_idx]
+        w_img_name_list = img_name_list[w_start_idx//4:w_start_idx//4 + len(w_latent_name_list)//4]
+
+        w_img_list_ = []
+        for j in range(len(w_img_name_list)):
+            for k in range(4):
+                w_img_list_.append(w_img_name_list[j])
+        w_img_name_list = w_img_list_
 
         if w_i == 0:
             is_first_batch = True
