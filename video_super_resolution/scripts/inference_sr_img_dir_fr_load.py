@@ -187,6 +187,7 @@ def main():
 
     n_steps = int(ceil((n_frames - in_win_size) / in_win_step)) + 1
     for w_i in range(n_steps):
+
         w_start_idx = w_i * in_win_size if w_i != n_steps - 1 else n_frames - in_win_size
         w_end_idx = w_start_idx + in_win_size if w_i != n_steps - 1 else n_frames
         w_latent_name_list = latents_name_list[w_start_idx:w_end_idx]
@@ -197,6 +198,8 @@ def main():
             for k in range(4):
                 w_img_list_.append(w_img_name_list[j])
         w_img_name_list = w_img_list_
+
+        print(f"Step {w_i} processing {len(w_img_name_list)} images")
 
         if w_i == 0:
             is_first_batch = True
@@ -225,8 +228,10 @@ def main():
 
         image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
         for i in range(len(w_img_name_list)):
-            out_path = os.path.join(save_dir, w_img_name_list[i])
+            img_name = os.path.splitext(w_latent_name_list[i])[0]+".png"
+            out_path = os.path.join(save_dir, img_name)
             cv2.imwrite(out_path, image_sr_list[i])
+            print(f"Saving {out_path}")
 
 
 if __name__ == '__main__':
