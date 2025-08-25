@@ -89,11 +89,12 @@ def enhance_a_video_fr(vae,
                        max_chunk_len,
                        color_cor_method,
                        device=torch.device(f'cuda:0'),
-                       decoder_tile_size=64):
+                       decoder_tile_size=64,
+                       upscale=4):
     video_data = preprocess(input_frames)
     bs = 1
     frames_num, _, h, w = video_data.shape
-    target_h, target_w = int(h * 4), int(w * 4)  # adjust_resolution(h, w, up_scale=4)
+    target_h, target_w = int(h * upscale), int(w * upscale)  # adjust_resolution(h, w, up_scale=4)
     padding = pad_to_fit(target_h, target_w)
     with torch.no_grad():
         with amp.autocast(enabled=True):
@@ -154,6 +155,7 @@ def main():
 
     solver_mode = args.solver_mode
 
+    upscale = args.upscale
 
     max_chunk_len = args.max_chunk_len
     device = torch.device(args.device)
@@ -224,7 +226,8 @@ def main():
                                                                 max_chunk_len=max_chunk_len,
                                                                 color_cor_method=color_cor_method,
                                                                 device=device,
-                                                                decoder_tile_size=decoder_tile_size)
+                                                                decoder_tile_size=decoder_tile_size,
+                                                                upscale=upscale)
 
         image_sr_list = [(img.numpy()).astype('uint8')[:, :, ::-1] for img in video_sr]
         for i in range(len(w_img_name_list)):
