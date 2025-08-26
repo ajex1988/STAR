@@ -622,9 +622,17 @@ class GroupNormParam:
         """
         Get mean and var for group norm
         """
-        b, c = input.size(0), input.size(1)
-        channel_in_group = int(c / num_groups)
-        input_reshaped = input.contiguous().view(1, int(b * num_groups), channel_in_group, *input.size()[2:])
+        if len(input.shape) == 4:
+            b, c = input.size(0), input.size(1)
+            channel_in_group = int(c / num_groups)
+            input_reshaped = input.contiguous().view(1, int(b * num_groups), channel_in_group, *input.size()[2:])
+        elif len(input.shape) == 5:
+            b, c = input.size(2), input.size(1)
+            channel_in_group = int(c / num_groups)
+            input = input.permute(0, 2, 1, 3, 4) # [1,c,b,h,w] -> [1,b,c,h,w]
+            input_reshaped = input.contiguous().view(1, int(b * num_groups), channel_in_group, *input.size()[3:])
+        else:
+            raise NotImplementedError
         var, mean = torch.var_mean(input_reshaped, dim=[0, 2, 3, 4], unbiased=False)
         return var, mean
 
@@ -642,22 +650,47 @@ class GroupNormParam:
 
         @return: normalized tensor
         """
-        b, c = input.size(0), input.size(1)
-        channel_in_group = int(c / num_groups)
-        input_reshaped = input.contiguous().view(
-            1, int(b * num_groups), channel_in_group, *input.size()[2:])
+        if len(input.shape) == 4:
+            b, c = input.size(0), input.size(1)
+            channel_in_group = int(c / num_groups)
+            input_reshaped = input.contiguous().view(
+                1, int(b * num_groups), channel_in_group, *input.size()[2:])
+            out = F.batch_norm(input_reshaped, mean.to(input), var.to(input), weight=None, bias=None, training=False,
+                               momentum=0, eps=eps)
+            out = out.view(b, c, *input.size()[2:])
 
-        out = F.batch_norm(input_reshaped, mean.to(input), var.to(input), weight=None, bias=None, training=False,
-                           momentum=0, eps=eps)
-        out = out.view(b, c, *input.size()[2:])
+            # post affine transform
+            if weight is not None:
+                weight.requires_grad = False
+                out *= weight.view(1, -1, 1, 1)
+            if bias is not None:
+                bias.requires_grad = False
+                out += bias.view(1, -1, 1, 1)
+        elif len(input.shape) == 5:
+            b, c = input.size(2), input.size(1)
+            channel_in_group = int(c / num_groups)
+            input = input.permute(0, 2, 1, 3, 4) # [1,b,c,h,w] -> [1,c,b,h,w]
+            input_reshaped = input.contiguous().view(
+                1, int(b * num_groups), channel_in_group, *input.size()[3:])
+            out = F.batch_norm(input_reshaped, mean.to(input), var.to(input), weight=None, bias=None, training=False,
+                               momentum=0, eps=eps)
+            out = out.view(b, c, *input.size()[3:])
 
-        # post affine transform
-        if weight is not None:
-            weight.requires_grad = False
-            out *= weight.view(1, -1, 1, 1)
-        if bias is not None:
-            bias.requires_grad = False
-            out += bias.view(1, -1, 1, 1)
+            # post affine transform
+            if weight is not None:
+                weight.requires_grad = False
+                out *= weight.view(1, -1, 1, 1)
+            if bias is not None:
+                bias.requires_grad = False
+                out += bias.view(1, -1, 1, 1)
+
+            # warp back to 1, c, b, h, w
+            out = out.permute(1, 0, 2, 3)
+            out = out[None,:]
+        else:
+            raise NotImplementedError
+
+
         return out
 
     def summary(self):

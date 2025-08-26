@@ -111,6 +111,9 @@ class UpModuleTileTaskQueue(nn.Module):
 
 
     def forward_task_queue(self, x):
+        device = next(self.up_blocks.parameters()).device
+        dtype = next(self.up_blocks.parameters()).dtype
+
         tile_helper = TileHook(model=None,tile_size=self.tile_size,scale=self.upscale,pad=self.pad)
 
         nf, nc, feat_h, feat_w = x.shape
@@ -118,6 +121,11 @@ class UpModuleTileTaskQueue(nn.Module):
         result = torch.zeros((nf, nc, feat_h * self.upscale, feat_w * self.upscale), device=x.device)
         n_tiles = len(in_bboxes)
         tile_completed = 0
+
+        tiles = []
+        for in_bbox in in_bboxes:
+            tile = x[:, :, in_bbox[1]:in_bbox[3], in_bbox[0]:in_bbox[2]].cpu()
+            tiles.append(tile)
 
         task_queue = build_up_blocks_task_queue(block=self.up_blocks)
         task_queues = [copy.deepcopy(task_queue) for _ in range(n_tiles)]
@@ -127,7 +135,7 @@ class UpModuleTileTaskQueue(nn.Module):
             for i in range(n_tiles):
                 in_bbx = in_bboxes[i]
                 out_bbx = out_bboxes[i]
-                tile = x[:, :, in_bbx[1]:in_bbx[3], in_bbx[0]:in_bbx[2]]
+                tile = tiles[i].to(device=device)
 
                 task_queue = task_queues[i]
 
@@ -147,6 +155,7 @@ class UpModuleTileTaskQueue(nn.Module):
                     elif task[0] == "add_res":
                         tile += task[1]
                     else:
+                        print(f"{task[0]}")
                         tile = task[1](tile)
 
                 if len(task_queue) == 0:
@@ -156,6 +165,10 @@ class UpModuleTileTaskQueue(nn.Module):
                                                                                                           in_bbox=in_bbx,
                                                                                                           t_bbx=out_bbx,
                                                                                                           scale=self.upscale)
+                    del tile
+                else:
+                    # Prepare to apply group norm
+                    tiles[i] = tile.cpu()
                     del tile
 
             if tile_completed == n_tiles:
@@ -167,7 +180,7 @@ class UpModuleTileTaskQueue(nn.Module):
                 for i in range(n_tiles):
                     task_queues[i].insert(0, ("apply_norm", group_norm_func))
 
-        return result
+        return result.to(dtype=dtype)
 
 
 def test_tiling():
