@@ -275,7 +275,7 @@ def test_no_tiling_recur():
 
 
 def main():
-    # test_no_tiling()
+    test_no_tiling()
     # test_tiling()
     test_task_queue_tiling()
 
