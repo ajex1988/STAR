@@ -33,8 +33,7 @@ def vec4d_to_5d(hidden_states):
     return hidden_states
 
 def vec5d_to_4d(hidden_states):
-    channels, num_frames, height, width = hidden_states.shape
-    hidden_states = hidden_states.permute(0, 2, 1, 3, 4).reshape(num_frames, channels, height, width)
+    hidden_states = hidden_states.permute(0, 2, 1, 3, 4)[0]
     return hidden_states
 
 

@@ -152,8 +152,16 @@ class UpModuleTileTaskQueue(nn.Module):
                         while task_queue[task_id][0] != "add_res":
                             task_id += 1
                         task_queue[task_id][1] = res
+                    elif task[0] == "store_x_spatial":
+                        task_id = 0
+                        x_spatial = task[1](tile)
+                        while task_queue[task_id][0] != "alpha_blend":
+                            task_id += 1
+                        task_queue[task_id] = (task_queue[task_id][0], task_queue[task_id][1], x_spatial)
                     elif task[0] == "add_res":
                         tile += task[1]
+                    elif task[0] == "alpha_blend":
+                        tile = task[1](task[2], tile)
                     else:
                         print(f"{task[0]}")
                         tile = task[1](tile)
