@@ -108,6 +108,7 @@ class UpModuleTileTaskQueue(nn.Module):
         x = self.forward_task_queue(x)
         feat_map_path = path_prefix + "_tile_task_queue.png"
         save_feature_map(x, feat_map_path)
+        return x
 
 
     def forward_task_queue(self, x):
@@ -118,7 +119,7 @@ class UpModuleTileTaskQueue(nn.Module):
 
         nf, nc, feat_h, feat_w = x.shape
         in_bboxes, out_bboxes = tile_helper._split_tiles(h=feat_h, w=feat_w,scale=8)
-        result = torch.zeros((nf, nc, feat_h * self.upscale, feat_w * self.upscale), device=x.device)
+        result = torch.zeros((nf, nc//4, feat_h * self.upscale, feat_w * self.upscale), device=x.device)
         n_tiles = len(in_bboxes)
         tile_completed = 0
 
@@ -163,13 +164,13 @@ class UpModuleTileTaskQueue(nn.Module):
                     elif task[0] == "alpha_blend":
                         tile = task[1](task[2], tile)
                     else:
-                        print(f"{task[0]}")
+                        # print(f"{task[0]}")
                         tile = task[1](tile)
 
                 if len(task_queue) == 0:
                     # finished current tile
                     tile_completed += 1
-                    result[out_bbx[1]:out_bbx[3], out_bbx[0]:out_bbx[2]] = tile_helper._crop_valid_region(tile=tile,
+                    result[:,:,out_bbx[1]:out_bbx[3], out_bbx[0]:out_bbx[2]] = tile_helper._crop_valid_region(tile=tile,
                                                                                                           in_bbox=in_bbx,
                                                                                                           t_bbx=out_bbx,
                                                                                                           scale=self.upscale)
