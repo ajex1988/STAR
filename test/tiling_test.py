@@ -299,7 +299,7 @@ def main():
     torch.manual_seed(10086)  # fix the seed to ensure reproducibility
     test_no_tiling()
     # test_tiling()
-    # test_task_queue_tiling()
+    test_task_queue_tiling()
 
 
 if __name__ == "__main__":
