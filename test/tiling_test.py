@@ -28,8 +28,7 @@ def parse_args():
     return args
 
 
-def get_input_feature_map(seed:int=10086, h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0"), requires_grad=False ):
-    torch.manual_seed(seed)
+def get_input_feature_map(h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0"), requires_grad=False ):
     input_shape = (n_frames,nc,h,w)
     input_tensor = torch.rand(input_shape,requires_grad=requires_grad)
     input_tensor = input_tensor.to(device)
@@ -60,6 +59,28 @@ class UpModule(nn.Module):
         save_feature_map(x, feat_map_path)
         return x
 
+
+class UpModuleFineGrained(nn.Module):
+    """
+    Go through every layer of the up block, so that feature map can be saved for debug
+    """
+    def __init__(self, up_blocks):
+        super(UpModuleFineGrained, self).__init__()
+        self.up_blocks = up_blocks
+
+    def forward(self, x, path_prefix):
+        image_only_indicator = torch.zeros(1, x.shape[0], dtype=x.dtype, device=x.device)
+        for i, block in enumerate(self.up_blocks):
+            for j, resnets in enumerate(block.resnets):
+                for k, resnet_layers in enumerate(resnets):
+                    for l, layer in enumerate(resnet_layers):
+                        x = layer(x, image_only_indicator=image_only_indicator)
+            feat_map_path = path_prefix + f"_{i}.png"
+            save_feature_map(x, feat_map_path)
+            x = block(x, image_only_indicator=image_only_indicator)
+        feat_map_path = path_prefix + f"_out.png"
+        save_feature_map(x, feat_map_path)
+        return x
 
 class UpModuleTile(nn.Module):
     def __init__(self, up_blocks, tile_size=64, upscale=8, pad=11):
@@ -164,7 +185,7 @@ class UpModuleTileTaskQueue(nn.Module):
                     elif task[0] == "alpha_blend":
                         tile = task[1](task[2], tile)
                     else:
-                        # print(f"{task[0]}")
+                        print(f"{task[0]}")
                         tile = task[1](tile)
 
                 if len(task_queue) == 0:
@@ -275,9 +296,10 @@ def test_no_tiling_recur():
 
 
 def main():
+    torch.manual_seed(10086)  # fix the seed to ensure reproducibility
     test_no_tiling()
     # test_tiling()
-    test_task_queue_tiling()
+    # test_task_queue_tiling()
 
 
 if __name__ == "__main__":
