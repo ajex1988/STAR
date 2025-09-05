@@ -10,6 +10,7 @@ from video_to_video.modules.task_queue import build_up_blocks_task_queue
 from video_to_video.modules.autoencoder_kl_temporal_decoder_feature_resetting import TileHook, GroupNormParam
 
 from diffusers.models.autoencoders.autoencoder_kl_temporal_decoder import TemporalDecoder
+from diffusers import AutoencoderKLTemporalDecoder
 
 
 def parse_args():
@@ -28,7 +29,8 @@ def parse_args():
     return args
 
 
-def get_input_feature_map(h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0"), requires_grad=False ):
+def get_input_feature_map(h:int=128, w:int=128, nc:int=512, n_frames:int=6, device:torch.device=torch.device("cuda:0"), requires_grad=False, seed_value=10086):
+    torch.manual_seed(seed_value)
     input_shape = (n_frames,nc,h,w)
     input_tensor = torch.rand(input_shape,requires_grad=requires_grad)
     input_tensor = input_tensor.to(device)
@@ -164,7 +166,9 @@ class UpModuleTileTaskQueue(nn.Module):
 
                 while len(task_queue) > 0:
                     task = task_queue.pop(0)
-
+                    print(f"{task[0]}")
+                    if task[0] == "upsample_2d":
+                        print("Here")
                     if task[0] == "pre_norm":
                         group_norm_helper.add_tile(tile=tile, layer=task[1])
                         break
@@ -185,7 +189,6 @@ class UpModuleTileTaskQueue(nn.Module):
                     elif task[0] == "alpha_blend":
                         tile = task[1](task[2], tile)
                     else:
-                        print(f"{task[0]}")
                         tile = task[1](tile)
 
                 if len(task_queue) == 0:
@@ -253,7 +256,14 @@ def test_no_tiling():
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    temporal_decoder = TemporalDecoder()
+    vae = AutoencoderKLTemporalDecoder.from_pretrained(
+        "stabilityai/stable-video-diffusion-img2vid", subfolder="vae", variant="fp16"
+    )
+    vae.eval()
+    vae.requires_grad_(False)
+    vae.to(device)
+
+    temporal_decoder = vae.decoder
     up_blocks = temporal_decoder.up_blocks
     up_blocks = up_blocks.to(device=device)
 
@@ -280,7 +290,14 @@ def test_task_queue_tiling():
         input_tensor = get_input_feature_map(h=height, w=width, n_frames=num_frames, nc=num_channels, device=device)
         print(f"Input shape: {input_tensor.shape}")
 
-        temporal_decoder = TemporalDecoder().to(device=device)
+        vae = AutoencoderKLTemporalDecoder.from_pretrained(
+            "stabilityai/stable-video-diffusion-img2vid", subfolder="vae", variant="fp16"
+        )
+        vae.eval()
+        vae.requires_grad_(False)
+        vae.to(device)
+
+        temporal_decoder = vae.decoder
 
         up_module = UpModuleTileTaskQueue(up_blocks=temporal_decoder.up_blocks)
         output_tensor = up_module(input_tensor, out_dir)
